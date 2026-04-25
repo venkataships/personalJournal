@@ -15,8 +15,13 @@ import {
   BookOpen,
   ChevronRight,
   AlertCircle,
+  Wallet,
+  ArrowUpRight,
+  ArrowDownRight,
+  ArrowLeft,
 } from 'lucide-react';
 import { supabase, authReady } from '../../lib/supabase';
+import { usePortfolio, RULE_ANCHORS } from '../../hooks/usePortfolio';
 
 // ---------------------------------------------------------------------------
 // Static config. Check-in IDs must match column names on `daily_checkins`.
@@ -129,9 +134,10 @@ async function fetchRules() {
 // Component
 // ---------------------------------------------------------------------------
 
-export default function DailyDashboard({ netWorth = 560899 }) {
+export default function DailyDashboard() {
   const [now, setNow] = useState(() => new Date());
   const dateKey = todayKey(now);
+  const portfolio = usePortfolio();
 
   // Minute tick so greeting crosses noon / 5pm / 9pm and day rolls over.
   useEffect(() => {
@@ -327,6 +333,13 @@ export default function DailyDashboard({ netWorth = 560899 }) {
       <div className="relative mx-auto max-w-3xl px-5 py-10 sm:px-8 sm:py-14">
         {/* ─── Header ─── */}
         <header className="mb-10">
+          <Link
+            to="/"
+            className="inline-flex items-center gap-1.5 mb-3 text-[11px] uppercase tracking-[0.22em] text-neutral-500 hover:text-emerald-400 transition-colors"
+          >
+            <ArrowLeft className="h-3 w-3" strokeWidth={2} />
+            Home
+          </Link>
           <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-neutral-500">
             <span
               className={`inline-block h-1.5 w-1.5 rounded-full ${
@@ -374,27 +387,69 @@ export default function DailyDashboard({ netWorth = 560899 }) {
           )}
         </header>
 
-        {/* ─── Net worth ─── */}
+        {/* ─── Trading portfolio ─── */}
         <section
-          aria-label="Net worth"
-          className="mb-10 flex items-end justify-between border-b border-neutral-800/80 pb-5"
+          aria-label="Trading portfolio"
+          className="mb-10 rounded-md border border-neutral-800 bg-neutral-950/40 px-5 py-5"
         >
-          <div>
-            <div className="text-[10px] font-medium uppercase tracking-[0.22em] text-neutral-500">
-              Net Worth
-            </div>
-            <div className="mt-2 font-mono text-3xl font-medium tabular-nums text-neutral-100 sm:text-4xl">
-              {formatUSD(netWorth)}
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.22em] text-neutral-500">
+                <Wallet className="h-3 w-3" strokeWidth={2} />
+                Trading portfolio
+              </div>
+              <div className="mt-2 font-mono text-3xl font-medium tabular-nums text-neutral-100 sm:text-4xl">
+                {portfolio.loading ? '—' : formatUSD(portfolio.value)}
+              </div>
+              {!portfolio.loading && (
+                <div className="mt-1 flex items-center gap-1 font-mono text-[12px] tabular-nums">
+                  {portfolio.realizedPnl > 0 ? (
+                    <>
+                      <ArrowUpRight className="h-3 w-3 text-emerald-400" strokeWidth={2} />
+                      <span className="text-emerald-400">+{formatUSD(portfolio.realizedPnl)}</span>
+                    </>
+                  ) : portfolio.realizedPnl < 0 ? (
+                    <>
+                      <ArrowDownRight className="h-3 w-3 text-red-400" strokeWidth={2} />
+                      <span className="text-red-400">{formatUSD(portfolio.realizedPnl)}</span>
+                    </>
+                  ) : (
+                    <span className="text-neutral-500">Flat · no closed trades</span>
+                  )}
+                  {portfolio.realizedPnl !== 0 && (
+                    <span className="text-neutral-600">from {formatUSD(portfolio.startingCapital)} start</span>
+                  )}
+                </div>
+              )}
             </div>
           </div>
-          <div className="text-right text-[10px] text-white/40">
-            <div>Last updated</div>
-            <div className="mt-0.5 font-mono">
-              {now.toLocaleDateString(undefined, {
-                month: 'short', day: 'numeric', year: 'numeric',
-              })}
+
+          {/* Caps row — position size limits derived from current portfolio */}
+          {!portfolio.loading && (
+            <div className="mt-5 pt-4 border-t border-neutral-900 grid grid-cols-3 gap-3">
+              <CapStat
+                label="Indep. max"
+                value={portfolio.caps.independent}
+                anchor={RULE_ANCHORS.anchorIndependent}
+              />
+              <CapStat
+                label="Discord max"
+                value={portfolio.caps.discord}
+                anchor={RULE_ANCHORS.anchorDiscord}
+              />
+              <CapStat
+                label="Loss cap"
+                value={portfolio.caps.maxLoss}
+                anchor={RULE_ANCHORS.anchorMaxLoss}
+              />
             </div>
-          </div>
+          )}
+
+          {portfolio.error && (
+            <div className="mt-3 text-[11px] text-red-400">
+              {portfolio.error}
+            </div>
+          )}
         </section>
 
         {/* ─── Intention ─── */}
@@ -510,14 +565,22 @@ export default function DailyDashboard({ netWorth = 560899 }) {
           </figure>
         </section>
 
-        <footer className="pt-6 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.3em] text-neutral-700">
-          <span>Discipline compounds.</span>
-          <Link
-            to="/tomorrow-prep"
-            className="inline-flex items-center gap-1.5 text-neutral-500 hover:text-emerald-400 transition-colors"
-          >
-            Tomorrow's prep →
-          </Link>
+        <footer className="pt-6 flex items-center justify-between gap-3 font-mono text-[10px] uppercase tracking-[0.3em] text-neutral-700">
+          <span className="hidden sm:inline">Discipline compounds.</span>
+          <div className="flex items-center gap-4 ml-auto">
+            <Link
+              to="/trade-journal"
+              className="inline-flex items-center gap-1.5 text-neutral-500 hover:text-emerald-400 transition-colors"
+            >
+              Log trade →
+            </Link>
+            <Link
+              to="/tomorrow-prep"
+              className="inline-flex items-center gap-1.5 text-neutral-500 hover:text-emerald-400 transition-colors"
+            >
+              Tomorrow's prep →
+            </Link>
+          </div>
         </footer>
       </div>
     </div>
@@ -527,6 +590,25 @@ export default function DailyDashboard({ netWorth = 560899 }) {
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
+
+function CapStat({ label, value, anchor }) {
+  // Show the derived value. If it's grown past the original anchor, display
+  // the anchor in faint text as a reminder of where the rule started.
+  const exceedsAnchor = value > anchor;
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-neutral-500">{label}</div>
+      <div className="mt-1 font-mono text-[14px] font-medium tabular-nums text-neutral-200">
+        {value.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}
+      </div>
+      {exceedsAnchor && (
+        <div className="text-[10px] font-mono text-neutral-600">
+          anchor {anchor.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function SectionLabel({ icon: Icon, label }) {
   return (
