@@ -8,6 +8,7 @@ import TradeJournalEntry from './features/trade-journal/TradeJournalEntry';
 import LifeJournal from './features/life-journal/LifeJournal';
 import Positions from './features/positions/Positions';
 import Watchlist from './features/watchlist/Watchlist';
+import Intelligence from './features/intelligence/Intelligence';
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
         <Route path="/life-journal"   element={<LifeJournal />} />
         <Route path="/positions"      element={<Positions />} />
         <Route path="/watchlist"      element={<Watchlist />} />
+        <Route path="/intelligence"   element={<Intelligence />} />
         <Route path="*"               element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

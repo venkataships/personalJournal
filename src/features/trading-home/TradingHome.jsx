@@ -291,6 +291,23 @@ export default function TradingHome() {
   </Link>
 </section>
 
+<section className="mb-6">
+  <Link
+    to="/intelligence"
+    className="group flex items-center justify-between rounded-md border border-neutral-800 bg-neutral-950/40 px-5 py-4 hover:border-emerald-500/40 hover:bg-neutral-900/50 transition-all"
+  >
+    <div>
+      <div className="text-[10px] uppercase tracking-[0.22em] text-emerald-400/80">
+        Intelligence
+      </div>
+      <div className="mt-1 text-[13px] text-neutral-400">
+        Morning brief, sector analysis, watchlist pulse
+      </div>
+    </div>
+    <ArrowRight className="h-4 w-4 text-neutral-500 group-hover:text-emerald-400 group-hover:translate-x-0.5 transition-all" strokeWidth={2} />
+  </Link>
+</section>
+
 </section>
             Log a trade
           </Link>
