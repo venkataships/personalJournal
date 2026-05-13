@@ -297,22 +297,20 @@ Swing trader context: 2-10 day holds, need catalyst + sector confirmation before
 }
 
 function buildPulsePrompt(d, priceMap) {
-  const heldTickers = d.positions.map((p) => p.ticker).join(', ') || 'None';
   const today = new Date().toLocaleDateString('en-US', {
-    month: 'short', day: 'numeric', year: 'numeric',
+    weekday: 'long', month: 'short', day: 'numeric',
   });
-  const hasPrices = priceMap.size > 0;
 
-  // ── Per-ticker price lines ────────────────────────────────────────────────
+  // ── Per-ticker price line ─────────────────────────────────────────────────
   const priceLine = (ticker) => {
     const q = priceMap.get(ticker.toUpperCase());
-    if (!q || q.price == null) return `${ticker} (price unavailable)`;
-    const sign = q.changePct >= 0 ? '+' : '';
-    return `${ticker} $${q.price.toFixed(2)} (${sign}${q.changePct.toFixed(2)}%)`;
+    if (!q || q.price == null) return null;
+    const sign = (q.changePct ?? 0) >= 0 ? '+' : '';
+    const pct  = q.changePct != null ? `${sign}${q.changePct.toFixed(2)}%` : 'chg N/A';
+    return `${ticker} $${q.price.toFixed(2)} (${pct})`;
   };
 
   // ── Sector heat map ───────────────────────────────────────────────────────
-  // Group watchlist by category, compute avg % change, sort hottest first.
   const byCategory = {};
   for (const w of d.watchlist) {
     const cat = w.category || 'Uncategorized';
@@ -320,83 +318,82 @@ function buildPulsePrompt(d, priceMap) {
     byCategory[cat].push(w.ticker);
   }
 
-  const sectorHeat = Object.entries(byCategory).map(([cat, tickers]) => {
-    const changes = tickers
-      .map((t) => priceMap.get(t.toUpperCase())?.changePct)
-      .filter((c) => c != null);
-    const avg = changes.length
-      ? changes.reduce((s, c) => s + c, 0) / changes.length
-      : null;
-    const tickerLines = tickers.map(priceLine).join(', ');
-    const avgStr = avg != null
-      ? (avg >= 0 ? `+${avg.toFixed(2)}` : avg.toFixed(2)) + '%'
-      : 'no price data';
-    return { cat, avg, avgStr, tickerLines };
-  }).sort((a, b) => (b.avg ?? -999) - (a.avg ?? -999));
+  const sectorRows = Object.entries(byCategory)
+    .map(([cat, tickers]) => {
+      const changes = tickers
+        .map((t) => priceMap.get(t.toUpperCase())?.changePct)
+        .filter((c) => c != null && Number.isFinite(c));
+      const avg = changes.length
+        ? changes.reduce((s, c) => s + c, 0) / changes.length
+        : null;
+      const lines = tickers.map(priceLine).filter(Boolean).join(' | ');
+      const avgStr = avg != null
+        ? (avg >= 0 ? `+${avg.toFixed(2)}` : avg.toFixed(2)) + '%'
+        : 'no data';
+      return { cat, avg: avg ?? -999, avgStr, lines };
+    })
+    .sort((a, b) => b.avg - a.avg);
 
-  const sectorHeatBlock = sectorHeat
-    .map(({ cat, avgStr, tickerLines }) =>
-      `${cat.toUpperCase()} (avg ${avgStr}): ${tickerLines}`)
-    .join('\n');
+  const heatBlock = sectorRows
+    .map(({ cat, avgStr, lines }) =>
+      `${cat.toUpperCase()} avg ${avgStr}\n  ${lines || '(no price data)'}`)
+    .join('\n\n');
 
-  // ── Leaders / fallers / flat ──────────────────────────────────────────────
-  const allWlTickers = d.watchlist.map((w) => w.ticker);
-  const leaders = allWlTickers.filter((t) => (priceMap.get(t.toUpperCase())?.changePct ?? 0) > 1.5);
-  const fallers = allWlTickers.filter((t) => (priceMap.get(t.toUpperCase())?.changePct ?? 0) < -1.5);
-  const flat    = allWlTickers.filter((t) => {
-    const c = priceMap.get(t.toUpperCase())?.changePct;
-    return c != null && c >= -1.5 && c <= 1.5;
-  });
+  // ── All tickers ranked by % change ───────────────────────────────────────
+  const allRanked = d.watchlist
+    .map((w) => {
+      const q = priceMap.get(w.ticker.toUpperCase());
+      return {
+        ticker: w.ticker,
+        cat: w.category || 'Uncategorized',
+        changePct: q?.changePct ?? null,
+        price: q?.price ?? null,
+      };
+    })
+    .filter((x) => x.changePct != null && Number.isFinite(x.changePct))
+    .sort((a, b) => b.changePct - a.changePct);
 
-  const leadersBlock = leaders.length ? leaders.map(priceLine).join('\n') : 'None >+1.5%';
-  const fallersBlock = fallers.length ? fallers.map(priceLine).join('\n') : 'None <-1.5%';
-  const flatBlock    = flat.length    ? flat.map(priceLine).join('\n')    : 'None in range';
+  const top5    = allRanked.slice(0, 5);
+  const bottom5 = allRanked.slice(-5).reverse();
 
-  return `Analyze today's watchlist movers and identify actionable setups.
+  const rankLine = (x) => {
+    const sign = x.changePct >= 0 ? '+' : '';
+    return `${x.ticker} $${x.price.toFixed(2)} (${sign}${x.changePct.toFixed(2)}%) [${x.cat}]`;
+  };
 
-SECTOR HEAT MAP (sorted hottest to coldest):
-${hasPrices ? sectorHeatBlock : '[Live prices unavailable — heat map not available]'}
+  const gainersBlock = top5.length    ? top5.map(rankLine).join('\n')    : 'No data';
+  const losersBlock  = bottom5.length ? bottom5.map(rankLine).join('\n') : 'No data';
 
-WATCHLIST LEADERS (>+1.5%):
-${leadersBlock}
+  return `Watchlist market pulse for ${today}.
 
-WATCHLIST FALLERS (<-1.5%):
-${fallersBlock}
+SECTOR HEAT MAP (hottest to coldest):
+${heatBlock}
 
-FLAT / WAITING:
-${flatBlock}
+TOP 5 GAINERS TODAY:
+${gainersBlock}
 
-ACTIVE CATALYSTS:
-${fmtCatalysts(d.catalysts)}
+TOP 5 LOSERS TODAY:
+${losersBlock}
 
-HELD POSITIONS:
-${heldTickers}
-
-Produce this exact format:
+Based on this data, produce exactly this format — tight, no filler:
 
 📊 WATCHLIST PULSE — ${today}
 
-🔥 SECTOR HEAT MAP
-[For each sector, one line: name, avg change, which tickers are leading]
-[Call out the hottest and coldest sectors explicitly]
-[Flag any sector where ALL tickers are moving together — that's a real sector move, not noise]
+🔥 SECTOR HEAT
+[3-4 lines. Name the hottest and coldest sectors with their avg move.
+Flag if an entire sector is green or red — that is a real sector move, not single-stock noise.
+One sentence on what the rotation is telling you.]
 
-🟢 LEADING TODAY
-[For each leader: ticker +X.X% — why (catalyst/breakout/sector rotation) | action: enter/add/hold/watch]
+🟢 TOP GAINERS
+[Each of the top 5: ticker +X.X% — one sentence on why it might be moving based on sector/name. No generic filler.]
 
-🔴 FALLING TODAY
-[For each faller: ticker -X.X% — why | action: exit/hold/avoid]
+🔴 TOP LOSERS
+[Each of the bottom 5: ticker -X.X% — same format.]
 
-⚡ BEST SETUP TODAY
-[The single highest-conviction swing setup right now — ticker, why today, entry thesis in 2 sentences]
-
-🔬 CATALYST CONFIRMATION
-[Is today's price action confirming or contradicting your active catalysts?]
-[One line per active catalyst]
-
-💡 MISSING COVERAGE
-[Any hot sector today with zero or thin watchlist coverage? Name 1-2 tickers to consider adding]`;
+⚡ ONE SETUP
+[The single most interesting ticker today based purely on the price action. One sentence. Be specific about price level.]`;
 }
+
 
 // ---------------------------------------------------------------------------
 // Component
