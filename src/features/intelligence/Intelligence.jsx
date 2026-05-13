@@ -79,6 +79,66 @@ async function fetchAll() {
 }
 
 // ---------------------------------------------------------------------------
+// Live price fetching — Yahoo Finance batch quote (unofficial but stable)
+// One request for all tickers. Returns Map<ticker, { price, changePct }>
+// Falls back gracefully: missing tickers simply won't appear in the map.
+// ---------------------------------------------------------------------------
+
+async function fetchPrices(tickers) {
+  if (!tickers.length) return new Map();
+  const unique = [...new Set(tickers.map((t) => t.toUpperCase()))];
+  const symbols = unique.join(',');
+
+  // Always calls /api/quotes (Vercel serverless function) — Public's API
+  // requires a Bearer token that must stay server-side, so this can't be
+  // called directly from the browser.
+  //
+  // LOCALHOST: run `vercel dev` instead of `npm run dev` so the function
+  // executes locally. `npm run dev` won't have /api/quotes available.
+  const url = `/api/quotes?symbols=${symbols}`;
+
+  try {
+    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(`Quote fetch HTTP ${res.status}: ${err.error || err.detail || ''}`);
+    }
+
+    const data = await res.json();
+    // Public returns: { quotes: [{ instrument: { symbol }, last, oneDayChange: { percentChange } }] }
+    const quotes = data?.quotes || [];
+    const map = new Map();
+    for (const q of quotes) {
+      const sym = q?.instrument?.symbol?.toUpperCase();
+      if (!sym || q.outcome !== 'SUCCESS') continue;
+
+      const price = parseFloat(q.last) || null;
+
+      // Public's oneDayChange.percentChange is sometimes missing or empty.
+      // Fall back to computing from previousClose if needed.
+      let changePct = null;
+      const raw = q.oneDayChange?.percentChange;
+      if (raw != null && raw !== '' && !isNaN(parseFloat(raw))) {
+        changePct = parseFloat(raw);
+      } else if (price != null && q.previousClose) {
+        const prev = parseFloat(q.previousClose);
+        if (prev > 0) changePct = ((price - prev) / prev) * 100;
+      }
+
+      map.set(sym, {
+        price,
+        changePct: changePct != null ? Math.round(changePct * 100) / 100 : null,
+        name: sym,
+      });
+    }
+    return map;
+  } catch (e) {
+    console.warn('Price fetch failed:', e.message);
+    return new Map();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Prompt builders — format Supabase rows into readable text blocks
 // ---------------------------------------------------------------------------
 
@@ -236,54 +296,106 @@ Structure your analysis:
 Swing trader context: 2-10 day holds, need catalyst + sector confirmation before entry.`;
 }
 
-function buildPulsePrompt(d) {
+function buildPulsePrompt(d, priceMap) {
   const heldTickers = d.positions.map((p) => p.ticker).join(', ') || 'None';
   const today = new Date().toLocaleDateString('en-US', {
     month: 'short', day: 'numeric', year: 'numeric',
   });
+  const hasPrices = priceMap.size > 0;
 
-  // TODO: Replace this block with live price data when a quote API is available.
-  // Shape expected: [{ ticker, price, change_pct }]
-  // Inject into watchlist_with_prices as: "TICKER $price (+X.X%)"
-  // Split into leaders (>+1%), fallers (<-1%), flat for the prompt below.
-  const noLivePricesNote = `[Live prices not available — analysis based on catalyst alignment and watchlist composition]`;
+  // ── Per-ticker price lines ────────────────────────────────────────────────
+  const priceLine = (ticker) => {
+    const q = priceMap.get(ticker.toUpperCase());
+    if (!q || q.price == null) return `${ticker} (price unavailable)`;
+    const sign = q.changePct >= 0 ? '+' : '';
+    return `${ticker} $${q.price.toFixed(2)} (${sign}${q.changePct.toFixed(2)}%)`;
+  };
+
+  // ── Sector heat map ───────────────────────────────────────────────────────
+  // Group watchlist by category, compute avg % change, sort hottest first.
+  const byCategory = {};
+  for (const w of d.watchlist) {
+    const cat = w.category || 'Uncategorized';
+    if (!byCategory[cat]) byCategory[cat] = [];
+    byCategory[cat].push(w.ticker);
+  }
+
+  const sectorHeat = Object.entries(byCategory).map(([cat, tickers]) => {
+    const changes = tickers
+      .map((t) => priceMap.get(t.toUpperCase())?.changePct)
+      .filter((c) => c != null);
+    const avg = changes.length
+      ? changes.reduce((s, c) => s + c, 0) / changes.length
+      : null;
+    const tickerLines = tickers.map(priceLine).join(', ');
+    const avgStr = avg != null
+      ? (avg >= 0 ? `+${avg.toFixed(2)}` : avg.toFixed(2)) + '%'
+      : 'no price data';
+    return { cat, avg, avgStr, tickerLines };
+  }).sort((a, b) => (b.avg ?? -999) - (a.avg ?? -999));
+
+  const sectorHeatBlock = sectorHeat
+    .map(({ cat, avgStr, tickerLines }) =>
+      `${cat.toUpperCase()} (avg ${avgStr}): ${tickerLines}`)
+    .join('\n');
+
+  // ── Leaders / fallers / flat ──────────────────────────────────────────────
+  const allWlTickers = d.watchlist.map((w) => w.ticker);
+  const leaders = allWlTickers.filter((t) => (priceMap.get(t.toUpperCase())?.changePct ?? 0) > 1.5);
+  const fallers = allWlTickers.filter((t) => (priceMap.get(t.toUpperCase())?.changePct ?? 0) < -1.5);
+  const flat    = allWlTickers.filter((t) => {
+    const c = priceMap.get(t.toUpperCase())?.changePct;
+    return c != null && c >= -1.5 && c <= 1.5;
+  });
+
+  const leadersBlock = leaders.length ? leaders.map(priceLine).join('\n') : 'None >+1.5%';
+  const fallersBlock = fallers.length ? fallers.map(priceLine).join('\n') : 'None <-1.5%';
+  const flatBlock    = flat.length    ? flat.map(priceLine).join('\n')    : 'None in range';
 
   return `Analyze today's watchlist movers and identify actionable setups.
 
-WATCHLIST WITH COMPOSITION:
-${fmtWatchlistByCategory(d.watchlist)}
+SECTOR HEAT MAP (sorted hottest to coldest):
+${hasPrices ? sectorHeatBlock : '[Live prices unavailable — heat map not available]'}
+
+WATCHLIST LEADERS (>+1.5%):
+${leadersBlock}
+
+WATCHLIST FALLERS (<-1.5%):
+${fallersBlock}
+
+FLAT / WAITING:
+${flatBlock}
 
 ACTIVE CATALYSTS:
 ${fmtCatalysts(d.catalysts)}
 
-HELD POSITIONS (for cross-reference):
+HELD POSITIONS:
 ${heldTickers}
-
-PRICE DATA: ${noLivePricesNote}
-
-Since live prices are unavailable, focus on:
-1. Catalyst alignment — which watchlist tickers have the strongest near-term catalyst?
-2. Stage analysis — which tickers are in accumulation vs breakout stages?
-3. Sentiment cross-reference — any bearish watchlist tickers contradicting current catalysts?
 
 Produce this exact format:
 
 📊 WATCHLIST PULSE — ${today}
 
-⚡ HIGHEST CONVICTION SETUPS (2-3)
-[ticker] — [catalyst or thesis reason] | [stage] | [recommended action: enter/add/hold/watch]
+🔥 SECTOR HEAT MAP
+[For each sector, one line: name, avg change, which tickers are leading]
+[Call out the hottest and coldest sectors explicitly]
+[Flag any sector where ALL tickers are moving together — that's a real sector move, not noise]
 
-🔬 CATALYST CHECK
-[Are any active catalysts specifically aligned with watchlist names?]
-[One sentence per active catalyst, naming the ticker]
+🟢 LEADING TODAY
+[For each leader: ticker +X.X% — why (catalyst/breakout/sector rotation) | action: enter/add/hold/watch]
 
-📋 WATCHLIST HEALTH
-[Any categories with no catalyst coverage? Any sentiment mismatches to flag?]
+🔴 FALLING TODAY
+[For each faller: ticker -X.X% — why | action: exit/hold/avoid]
 
-💡 COVERAGE GAPS
-[Any sector themes in your catalysts with zero watchlist coverage?]
+⚡ BEST SETUP TODAY
+[The single highest-conviction swing setup right now — ticker, why today, entry thesis in 2 sentences]
 
-Note: Add live price data to upgrade this analysis to include actual movers.`;
+🔬 CATALYST CONFIRMATION
+[Is today's price action confirming or contradicting your active catalysts?]
+[One line per active catalyst]
+
+💡 MISSING COVERAGE
+[Any hot sector today with zero or thin watchlist coverage? Name 1-2 tickers to consider adding]`;
 }
 
 // ---------------------------------------------------------------------------
@@ -361,11 +473,24 @@ export default function Intelligence() {
     setBrief(brief.id, { status: 'streaming', text: '' });
 
     try {
+      // For Watchlist Pulse: fetch live prices now that we have the watchlist.
+      // Other briefs don't need prices so we skip the extra network call.
+      let priceMap = new Map();
+      if (brief.id === 'pulse' && data.watchlist.length > 0) {
+        const tickers = data.watchlist.map((w) => w.ticker);
+        priceMap = await fetchPrices(tickers);
+      }
+
       const stream = anthropic.messages.stream({
         model: CLAUDE_MODEL,
         max_tokens: 1024,
         system: brief.system,
-        messages: [{ role: 'user', content: brief.buildPrompt(data) }],
+        messages: [{
+          role: 'user',
+          content: brief.id === 'pulse'
+            ? brief.buildPrompt(data, priceMap)
+            : brief.buildPrompt(data),
+        }],
       });
 
       for await (const event of stream) {
