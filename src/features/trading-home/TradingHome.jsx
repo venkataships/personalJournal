@@ -7,8 +7,8 @@ import {
   AlertCircle,
   Plus,
   ArrowRight,
+  ArrowLeft,
   TrendingUp,
-  HeartPulse,
   Sparkles,
   BookText,
   ClipboardCheck,
@@ -51,20 +51,6 @@ function formatUSD(n) {
   });
 }
 
-function wordCount(s) {
-  if (!s) return 0;
-  return s.trim().split(/\s+/).filter(Boolean).length;
-}
-
-// Days between two YYYY-MM-DD keys (positive = b after a)
-function daysBetween(aKey, bKey) {
-  const [ay, am, ad] = aKey.split('-').map(Number);
-  const [by, bm, bd] = bKey.split('-').map(Number);
-  const a = new Date(ay, am - 1, ad);
-  const b = new Date(by, bm - 1, bd);
-  return Math.round((b - a) / 86_400_000);
-}
-
 const CHECKIN_KEYS = [
   'trading_ready', 'work_focused', 'movement_done', 'device_boundaries', 'present_with_akhila',
 ];
@@ -73,12 +59,11 @@ const CHECKIN_KEYS = [
 // Component
 // ---------------------------------------------------------------------------
 
-export default function HomeScreen() {
+export default function TradingHome() {
   const [now, setNow] = useState(() => new Date());
   const dateKey = todayKey(now);
   const portfolio = usePortfolio();
 
-  // Minute tick for greeting transitions and day rollover
   useEffect(() => {
     let intervalId;
     const msToNextMinute = 60_000 - (Date.now() % 60_000);
@@ -92,15 +77,12 @@ export default function HomeScreen() {
     };
   }, []);
 
-  // Today's data — pulled across both systems
   const [data, setData] = useState({
     loading: true,
     error: null,
     intention: '',
     checkInsCompleted: 0,
     openTradesCount: 0,
-    lifeToday: null,             // life_journal row for today, or null
-    lastLifeEntryDate: null,     // YYYY-MM-DD of most recent entry, or null
   });
 
   useEffect(() => {
@@ -109,22 +91,12 @@ export default function HomeScreen() {
     (async () => {
       try {
         await authReady();
-        const [
-          checkinRes,
-          openTradesRes,
-          lifeTodayRes,
-          lifeLatestRes,
-        ] = await Promise.all([
+        const [checkinRes, openTradesRes] = await Promise.all([
           supabase.from('daily_checkins').select('*').eq('date', dateKey).maybeSingle(),
           supabase.from('trade_journal').select('*', { count: 'exact', head: true }).eq('status', 'open'),
-          supabase.from('life_journal').select('*').eq('date', dateKey).maybeSingle(),
-          supabase.from('life_journal').select('date').order('date', { ascending: false }).limit(1).maybeSingle(),
         ]);
-
         if (checkinRes.error) throw checkinRes.error;
         if (openTradesRes.error) throw openTradesRes.error;
-        if (lifeTodayRes.error) throw lifeTodayRes.error;
-        if (lifeLatestRes.error) throw lifeLatestRes.error;
         if (cancelled) return;
 
         const ci = checkinRes.data;
@@ -136,8 +108,6 @@ export default function HomeScreen() {
           intention: ci?.intention || '',
           checkInsCompleted: completed,
           openTradesCount: openTradesRes.count ?? 0,
-          lifeToday: lifeTodayRes.data,
-          lastLifeEntryDate: lifeLatestRes.data?.date || null,
         });
       } catch (e) {
         if (!cancelled) {
@@ -163,9 +133,16 @@ export default function HomeScreen() {
         }}
       />
 
-      <div className="relative mx-auto max-w-4xl px-5 py-10 sm:px-8 sm:py-14">
-        {/* ─── Header ─── */}
+      <div className="relative mx-auto max-w-3xl px-5 py-10 sm:px-8 sm:py-14">
         <header className="mb-10">
+          <Link
+            to="/"
+            className="inline-flex items-center gap-1.5 mb-3 text-[11px] uppercase tracking-[0.22em] text-neutral-500 hover:text-emerald-400 transition-colors"
+          >
+            <ArrowLeft className="h-3 w-3" strokeWidth={2} />
+            Switch
+          </Link>
+
           <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-neutral-500">
             <span className="relative inline-flex h-1.5 w-1.5">
               {isLive && (
@@ -179,7 +156,7 @@ export default function HomeScreen() {
                 }`}
               />
             </span>
-            <span>Command Center</span>
+            <span>Trading</span>
             <span className="text-neutral-700">·</span>
             <span className="font-mono">{formatLongDate(now)}</span>
           </div>
@@ -197,23 +174,55 @@ export default function HomeScreen() {
           )}
         </header>
 
-        {/* ─── Two registers, side by side ─── */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-8">
-          <TradingCard
-            loading={data.loading || portfolio.loading}
-            portfolio={portfolio}
-            checkInsCompleted={data.checkInsCompleted}
-            openTradesCount={data.openTradesCount}
-          />
-          <LifeCard
-            loading={data.loading}
-            today={data.lifeToday}
-            lastEntryDate={data.lastLifeEntryDate}
-            todayKey={dateKey}
-          />
-        </div>
+        {/* Portfolio + status */}
+        <Link
+          to="/dashboard"
+          className="group block rounded-md border border-neutral-800 bg-neutral-950/40 px-5 py-5 mb-8 hover:border-emerald-500/40 hover:bg-neutral-900/50 transition-all"
+        >
+          <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] text-emerald-400/80">
+            <TrendingUp className="h-3 w-3" strokeWidth={2} />
+            Trading today
+          </div>
 
-        {/* ─── Intention ─── */}
+          <div className="mt-4 space-y-3">
+            <div>
+              <div className="font-mono text-3xl font-medium tabular-nums text-neutral-100">
+                {data.loading || portfolio.loading ? '—' : formatUSD(portfolio.value)}
+              </div>
+              <div className="font-mono text-[11px] text-neutral-500 tabular-nums">
+                {portfolio.loading
+                  ? ''
+                  : portfolio.realizedPnl > 0
+                  ? <span className="text-emerald-400">+{formatUSD(portfolio.realizedPnl)} realized</span>
+                  : portfolio.realizedPnl < 0
+                  ? <span className="text-red-400">{formatUSD(portfolio.realizedPnl)} realized</span>
+                  : <span>Flat · no closed trades</span>}
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-neutral-900 grid grid-cols-2 gap-3 text-[12px]">
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-neutral-500">Check-ins</div>
+                <div className="mt-1 font-mono tabular-nums text-neutral-200">
+                  {data.loading ? '—' : `${data.checkInsCompleted} / 5`}
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-neutral-500">Open trades</div>
+                <div className="mt-1 font-mono tabular-nums text-neutral-200">
+                  {data.loading ? '—' : data.openTradesCount}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-5 flex items-center gap-1 text-[11px] uppercase tracking-[0.18em] text-neutral-500 group-hover:text-emerald-400 transition-colors">
+            Open dashboard
+            <ArrowRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" strokeWidth={2} />
+          </div>
+        </Link>
+
+        {/* Intention */}
         <section className="mb-8">
           <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500 mb-3">
             Today's intention
@@ -241,23 +250,58 @@ export default function HomeScreen() {
           )}
         </section>
 
-        {/* ─── Quick action ─── */}
+        {/* Quick action */}
         <section className="mb-12">
           <Link
             to="/trade-journal"
             className="group flex items-center justify-center gap-2 w-full rounded-md border border-emerald-500/40 bg-emerald-500/10 px-5 py-4 text-[13px] font-medium uppercase tracking-[0.15em] text-emerald-200 hover:bg-emerald-500/15 hover:border-emerald-500/60 transition-all active:scale-[0.99]"
           >
             <Plus className="h-4 w-4" strokeWidth={2.5} />
+            {/* Positions link */}
+<section className="mb-6">
+  <Link
+    to="/positions"
+    className="group flex items-center justify-between rounded-md border border-neutral-800 bg-neutral-950/40 px-5 py-4 hover:border-emerald-500/40 hover:bg-neutral-900/50 transition-all"
+  >
+    <div>
+      <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] text-emerald-400/80">
+        Positions
+      </div>
+      <div className="mt-1 text-[13px] text-neutral-400">
+        Stocks, options, and cash you currently hold
+      </div>
+    </div>
+    <ArrowRight className="h-4 w-4 text-neutral-500 group-hover:text-emerald-400 group-hover:translate-x-0.5 transition-all" strokeWidth={2} />
+  </Link>
+
+  <section className="mb-6">
+  <Link
+    to="/watchlist"
+    className="group flex items-center justify-between rounded-md border border-neutral-800 bg-neutral-950/40 px-5 py-4 hover:border-emerald-500/40 hover:bg-neutral-900/50 transition-all"
+  >
+    <div>
+      <div className="text-[10px] uppercase tracking-[0.22em] text-emerald-400/80">
+        Watchlist
+      </div>
+      <div className="mt-1 text-[13px] text-neutral-400">
+        Tickers you're watching and why
+      </div>
+    </div>
+    <ArrowRight className="h-4 w-4 text-neutral-500 group-hover:text-emerald-400 group-hover:translate-x-0.5 transition-all" strokeWidth={2} />
+  </Link>
+</section>
+
+</section>
             Log a trade
           </Link>
         </section>
 
-        {/* ─── More: smaller, demoted ─── */}
+        {/* More */}
         <section className="mb-10">
           <div className="text-[10px] uppercase tracking-[0.22em] text-neutral-600 mb-3">
             More
           </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <SmallNav to="/tomorrow-prep"  icon={Sparkles}        title="Tomorrow's Prep"   enabled />
             <SmallNav to="/trade-journal"  icon={BookText}        title="Trade Journal"     enabled />
             <SmallNav to="/pre-trade"      icon={ClipboardCheck}  title="Pre-Trade Check"   />
@@ -274,157 +318,6 @@ export default function HomeScreen() {
     </div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Trading card — cockpit register: monospace, tight, emerald
-// ---------------------------------------------------------------------------
-
-function TradingCard({ loading, portfolio, checkInsCompleted, openTradesCount }) {
-  return (
-    <Link
-      to="/dashboard"
-      className="group flex flex-col rounded-md border border-neutral-800 bg-neutral-950/40 px-5 py-5 hover:border-emerald-500/40 hover:bg-neutral-900/50 transition-all"
-    >
-      <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] text-emerald-400/80">
-        <TrendingUp className="h-3 w-3" strokeWidth={2} />
-        Trading today
-      </div>
-
-      <div className="mt-4 space-y-3 flex-1">
-        {/* Portfolio value */}
-        <div>
-          <div className="font-mono text-2xl font-medium tabular-nums text-neutral-100">
-            {loading ? '—' : formatUSD(portfolio.value)}
-          </div>
-          <div className="font-mono text-[11px] text-neutral-500 tabular-nums">
-            {loading
-              ? ''
-              : portfolio.realizedPnl > 0
-              ? <span className="text-emerald-400">+{formatUSD(portfolio.realizedPnl)} realized</span>
-              : portfolio.realizedPnl < 0
-              ? <span className="text-red-400">{formatUSD(portfolio.realizedPnl)} realized</span>
-              : <span>Flat · no closed trades</span>}
-          </div>
-        </div>
-
-        {/* Today's trading state */}
-        <div className="pt-2 border-t border-neutral-900 grid grid-cols-2 gap-3 text-[12px]">
-          <div>
-            <div className="text-[10px] uppercase tracking-wider text-neutral-500">Check-ins</div>
-            <div className="mt-1 font-mono tabular-nums text-neutral-200">
-              {loading ? '—' : `${checkInsCompleted} / 5`}
-            </div>
-          </div>
-          <div>
-            <div className="text-[10px] uppercase tracking-wider text-neutral-500">Open trades</div>
-            <div className="mt-1 font-mono tabular-nums text-neutral-200">
-              {loading ? '—' : openTradesCount}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-5 flex items-center gap-1 text-[11px] uppercase tracking-[0.18em] text-neutral-500 group-hover:text-emerald-400 transition-colors">
-        Open dashboard
-        <ArrowRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" strokeWidth={2} />
-      </div>
-    </Link>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Life card — journal register: serif, breathing room, amber
-// ---------------------------------------------------------------------------
-
-function LifeCard({ loading, today, lastEntryDate, todayKey: tk }) {
-  // Status logic
-  const hasEntryToday = today != null;
-  const alive = today?.energy_level ?? null;
-  const words = wordCount(today?.free_write || '');
-  const daysSince = lastEntryDate ? daysBetween(lastEntryDate, tk) : null;
-
-  return (
-    <Link
-      to="/life-journal"
-      className="group flex flex-col rounded-md border border-neutral-800 bg-neutral-950/40 px-5 py-5 hover:border-amber-500/40 hover:bg-neutral-900/50 transition-all"
-    >
-      <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] text-amber-400/80">
-        <HeartPulse className="h-3 w-3" strokeWidth={2} />
-        Life today
-      </div>
-
-      <div className="mt-4 space-y-3 flex-1">
-        {/* Primary — alive feeling, or "not yet" */}
-        <div>
-          {loading ? (
-            <div className="font-serif text-2xl text-neutral-600">—</div>
-          ) : alive != null ? (
-            <>
-              <div className="font-serif text-2xl font-light text-neutral-100">
-                Felt <span className="text-amber-300">{alive}</span> of 10
-              </div>
-              <div className="font-serif text-[13px] italic text-neutral-500 mt-0.5">
-                {aliveWord(alive)}
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="font-serif text-xl font-light italic text-neutral-400">
-                {hasEntryToday ? 'Today, in progress' : 'Today, not written yet'}
-              </div>
-              {!hasEntryToday && daysSince != null && daysSince > 0 && (
-                <div className="font-serif text-[13px] italic text-neutral-700 mt-1">
-                  Last entry {daysSinceText(daysSince)}
-                </div>
-              )}
-              {!hasEntryToday && daysSince == null && (
-                <div className="font-serif text-[13px] italic text-neutral-700 mt-1">
-                  No entries yet
-                </div>
-              )}
-            </>
-          )}
-        </div>
-
-        {/* Secondary — words written today */}
-        {hasEntryToday && (
-          <div className="pt-2 border-t border-neutral-900">
-            <div className="font-serif text-[13px] italic text-neutral-500">
-              {words === 0
-                ? 'No words written'
-                : words === 1
-                ? '1 word written'
-                : `${words} words written`}
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="mt-5 flex items-center gap-1 font-serif text-[12px] italic text-neutral-500 group-hover:text-amber-400 transition-colors">
-        Open journal
-        <ArrowRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" strokeWidth={2} />
-      </div>
-    </Link>
-  );
-}
-
-function aliveWord(n) {
-  if (n <= 3) return 'going through motions';
-  if (n <= 6) return 'present but distracted';
-  if (n <= 8) return 'genuinely engaged';
-  return 'fully alive';
-}
-
-function daysSinceText(n) {
-  if (n === 1) return 'yesterday';
-  if (n < 7) return `${n} days ago`;
-  if (n < 14) return 'a week ago';
-  return `${Math.floor(n / 7)} weeks ago`;
-}
-
-// ---------------------------------------------------------------------------
-// Small nav tile for the "More" section
-// ---------------------------------------------------------------------------
 
 function SmallNav({ to, icon: Icon, title, enabled }) {
   if (enabled) {

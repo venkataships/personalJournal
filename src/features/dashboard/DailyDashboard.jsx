@@ -334,11 +334,11 @@ export default function DailyDashboard() {
         {/* ─── Header ─── */}
         <header className="mb-10">
           <Link
-            to="/"
+            to="/trading"
             className="inline-flex items-center gap-1.5 mb-3 text-[11px] uppercase tracking-[0.22em] text-neutral-500 hover:text-emerald-400 transition-colors"
           >
             <ArrowLeft className="h-3 w-3" strokeWidth={2} />
-            Home
+            Trading
           </Link>
           <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-neutral-500">
             <span

@@ -5,6 +5,7 @@ import {
   AlertCircle,
   Check,
   Loader2,
+  Send,
 } from 'lucide-react';
 import { supabase, authReady } from '../../lib/supabase';
 import { anthropic, CLAUDE_MODEL } from '../../lib/claude';
@@ -145,10 +146,11 @@ export default function LifeJournal() {
   const [tomorrowIntention, setTomorrowIntention] = useState('');
   const [lettingGo, setLettingGo] = useState('');
 
-  // Reflection state
-  const [reflectionText, setReflectionText] = useState('');
-  const [reflectionAt, setReflectionAt] = useState(null);
+  // Reflection state — now threaded.
+  // thread: [{ role: 'assistant' | 'user', text: string, at: ISOString }]
+  const [thread, setThread] = useState([]);
   const [reflecting, setReflecting] = useState(false);
+  const [responseDraft, setResponseDraft] = useState('');
 
   // --- Load on mount ---------------------------------------------------------
   useEffect(() => {
@@ -178,8 +180,20 @@ export default function LifeJournal() {
           setFreeWrite(row.free_write || '');
           setTomorrowIntention(row.tomorrow_priority || '');
           setLettingGo(row.letting_go || '');
-          setReflectionText(row.reflection_text || '');
-          setReflectionAt(row.reflection_at || null);
+
+          // Load thread. If only the legacy single reflection exists, hydrate
+          // the thread with it as turn 1 so old entries continue to work.
+          if (Array.isArray(row.reflection_thread) && row.reflection_thread.length > 0) {
+            setThread(row.reflection_thread);
+          } else if (row.reflection_text) {
+            setThread([{
+              role: 'assistant',
+              text: row.reflection_text,
+              at: row.reflection_at || new Date().toISOString(),
+            }]);
+          } else {
+            setThread([]);
+          }
         }
       } catch (e) {
         if (!cancelled) setError(e.message || 'Failed to load.');
@@ -260,35 +274,100 @@ export default function LifeJournal() {
     tomorrowIntention, lettingGo,
   ]);
 
+  // Calls Claude with: the journal entry as turn 1, then every turn from
+  // `existingThread`, then optionally an extra trailing user turn (the just-
+  // submitted response). Returns the new full thread including the assistant
+  // reply we just got back. Centralizing this avoids drift between the
+  // "first reflection" and "continue the conversation" code paths.
+  const callClaude = useCallback(async (existingThread, trailingUserText) => {
+    const messages = [
+      { role: 'user', content: buildReflectionInput() },
+      ...existingThread.map((m) => ({ role: m.role, content: m.text })),
+    ];
+    if (trailingUserText) {
+      messages.push({ role: 'user', content: trailingUserText });
+    }
+
+    const resp = await anthropic.messages.create({
+      model: CLAUDE_MODEL,
+      max_tokens: 400,
+      system: REFLECTION_SYSTEM_PROMPT,
+      messages,
+    });
+    const text = resp.content
+      .filter((b) => b.type === 'text')
+      .map((b) => b.text)
+      .join('')
+      .trim();
+
+    const now = new Date().toISOString();
+    const nextThread = [...existingThread];
+    if (trailingUserText) {
+      nextThread.push({ role: 'user', text: trailingUserText, at: now });
+    }
+    nextThread.push({ role: 'assistant', text, at: now });
+    return nextThread;
+  }, [buildReflectionInput]);
+
+  // First reflection (or "ask again" → fresh thread)
   const onReflect = useCallback(async () => {
     setReflecting(true);
     setError(null);
     try {
-      const resp = await anthropic.messages.create({
-        model: CLAUDE_MODEL,
-        max_tokens: 400,
-        system: REFLECTION_SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: buildReflectionInput() }],
-      });
-      const text = resp.content
-        .filter((b) => b.type === 'text')
-        .map((b) => b.text)
-        .join('')
-        .trim();
-      const stamp = new Date().toISOString();
-      setReflectionText(text);
-      setReflectionAt(stamp);
-      // Persist alongside the entry
+      const nextThread = await callClaude([], null);
+      setThread(nextThread);
+      // Persist the thread, plus mirror the first assistant turn into the
+      // legacy columns so anything that reads them still works.
+      const firstAssistant = nextThread.find((t) => t.role === 'assistant');
       await upsertEntry(dateKey, {
-        reflection_text: text,
-        reflection_at: stamp,
+        reflection_thread: nextThread,
+        reflection_text: firstAssistant?.text || null,
+        reflection_at: firstAssistant?.at || null,
       });
     } catch (e) {
       setError(e.message || 'Reflection failed.');
     } finally {
       setReflecting(false);
     }
-  }, [dateKey, buildReflectionInput]);
+  }, [dateKey, callClaude]);
+
+  // Continue the conversation: append user response, get assistant reply
+  const onContinueThread = useCallback(async () => {
+    const userText = responseDraft.trim();
+    if (!userText || reflecting) return;
+    setReflecting(true);
+    setError(null);
+    try {
+      const nextThread = await callClaude(thread, userText);
+      setThread(nextThread);
+      setResponseDraft('');
+      await upsertEntry(dateKey, { reflection_thread: nextThread });
+    } catch (e) {
+      setError(e.message || 'Failed to continue.');
+    } finally {
+      setReflecting(false);
+    }
+  }, [dateKey, thread, responseDraft, reflecting, callClaude]);
+
+  // Reset thread — used by "Ask again" on the first reflection
+  const onResetThread = useCallback(async () => {
+    setReflecting(true);
+    setError(null);
+    try {
+      const nextThread = await callClaude([], null);
+      setThread(nextThread);
+      const firstAssistant = nextThread.find((t) => t.role === 'assistant');
+      await upsertEntry(dateKey, {
+        reflection_thread: nextThread,
+        reflection_text: firstAssistant?.text || null,
+        reflection_at: firstAssistant?.at || null,
+      });
+    } catch (e) {
+      setError(e.message || 'Reflection failed.');
+    } finally {
+      setReflecting(false);
+    }
+  }, [dateKey, callClaude]);
 
   // --- Saved indicator -------------------------------------------------------
   const savedVisible = Date.now() - savedAt < 1500;
@@ -319,11 +398,11 @@ export default function LifeJournal() {
         {/* Header */}
         <header className="mb-12">
           <Link
-            to="/"
+            to="/life"
             className="inline-flex items-center gap-1.5 text-[12px] text-neutral-500 hover:text-amber-400 transition-colors"
           >
             <ArrowLeft className="h-3 w-3" strokeWidth={2} />
-            Home
+            Life
           </Link>
 
           <div className="mt-6 flex items-baseline justify-between">
@@ -563,17 +642,10 @@ export default function LifeJournal() {
               </button>
             </div>
 
-            {/* Reflection — Claude */}
-            {savedAt > 0 || reflectionText ? (
+            {/* Reflection — Claude. Threaded conversation. */}
+            {savedAt > 0 || thread.length > 0 ? (
               <div className="pt-2">
-                {reflectionText ? (
-                  <ReflectionCard
-                    text={reflectionText}
-                    timestamp={reflectionAt}
-                    onAskAgain={onReflect}
-                    busy={reflecting}
-                  />
-                ) : (
+                {thread.length === 0 ? (
                   <button
                     type="button"
                     onClick={onReflect}
@@ -589,6 +661,15 @@ export default function LifeJournal() {
                       'Ask for a reflection on this →'
                     )}
                   </button>
+                ) : (
+                  <ThreadView
+                    thread={thread}
+                    busy={reflecting}
+                    responseDraft={responseDraft}
+                    setResponseDraft={setResponseDraft}
+                    onContinue={onContinueThread}
+                    onReset={onResetThread}
+                  />
                 )}
               </div>
             ) : null}
@@ -718,7 +799,88 @@ function NumberInput({ value, onChange, suffix, step, placeholder }) {
   );
 }
 
-function ReflectionCard({ text, timestamp, onAskAgain, busy }) {
+// Renders the full reflection thread: alternating user/assistant turns,
+// followed by an input for the next user response. The input is always
+// visible after a successful exchange — no "continue" button to tap before
+// you can write. You either type or close the page.
+function ThreadView({ thread, busy, responseDraft, setResponseDraft, onContinue, onReset }) {
+  // Auto-grow the textarea as the user writes. Cap height so it never takes
+  // over the page on a long response.
+  const taRef = useRef(null);
+  useEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 240) + 'px';
+  }, [responseDraft]);
+
+  const onKeyDown = (e) => {
+    // Cmd/Ctrl+Enter to send. Plain Enter inserts a newline — this isn't chat,
+    // it's reflection, and people pause mid-thought.
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      onContinue();
+    }
+  };
+
+  const canSend = responseDraft.trim().length > 0 && !busy;
+
+  return (
+    <div className="space-y-5">
+      {thread.map((turn, i) => (
+        turn.role === 'assistant'
+          ? <AssistantTurn key={i} text={turn.text} timestamp={turn.at} />
+          : <UserTurn      key={i} text={turn.text} timestamp={turn.at} />
+      ))}
+
+      {/* If Claude is generating the next turn, show a faint pending row */}
+      {busy && (
+        <div className="rounded border-l-2 border-amber-500/30 bg-amber-500/[0.02] px-6 py-4 inline-flex items-center gap-2 font-serif italic text-[14px] text-neutral-500">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
+          Reading what you wrote…
+        </div>
+      )}
+
+      {/* Response input — always visible after the latest assistant turn */}
+      <div className="pt-2">
+        <textarea
+          ref={taRef}
+          value={responseDraft}
+          onChange={(e) => setResponseDraft(e.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder="Respond to this…"
+          rows={2}
+          disabled={busy}
+          className="w-full resize-none rounded border border-neutral-800/80 bg-neutral-950/40 px-4 py-3 font-serif text-[15px] leading-[1.7] text-neutral-100 placeholder:text-neutral-600 placeholder:italic focus:border-amber-500/40 focus:outline-none focus:ring-1 focus:ring-amber-500/30 transition-colors disabled:opacity-50"
+        />
+        <div className="mt-2 flex items-center justify-between">
+          <button
+            type="button"
+            onClick={onReset}
+            disabled={busy}
+            className="font-serif italic text-[12px] text-neutral-600 hover:text-amber-400 transition-colors disabled:opacity-50"
+          >
+            Start over
+          </button>
+          <button
+            type="button"
+            onClick={onContinue}
+            disabled={!canSend}
+            className="inline-flex items-center gap-2 rounded border border-amber-500/40 bg-amber-500/10 px-4 py-2 font-serif text-[13px] text-amber-200 hover:bg-amber-500/15 hover:border-amber-500/60 transition-all active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Send className="h-3.5 w-3.5" strokeWidth={2} />
+            Send
+          </button>
+        </div>
+        <div className="mt-1 text-right font-mono text-[10px] text-neutral-700">
+          ⌘↩ to send
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AssistantTurn({ text, timestamp }) {
   return (
     <div className="rounded border-l-2 border-amber-500/60 bg-amber-500/[0.03] px-6 py-5">
       <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-amber-400/70 mb-3">
@@ -727,21 +889,36 @@ function ReflectionCard({ text, timestamp, onAskAgain, busy }) {
       <p className="font-serif text-[15px] leading-[1.8] text-neutral-200 whitespace-pre-wrap">
         {text}
       </p>
-      <div className="mt-5 flex items-center justify-between text-[11px]">
-        <span className="font-mono text-neutral-600">
-          {timestamp ? new Date(timestamp).toLocaleString(undefined, {
+      {timestamp && (
+        <div className="mt-4 font-mono text-[10px] text-neutral-700">
+          {new Date(timestamp).toLocaleString(undefined, {
             month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
-          }) : ''}
-        </span>
-        <button
-          type="button"
-          onClick={onAskAgain}
-          disabled={busy}
-          className="font-serif italic text-neutral-500 hover:text-amber-400 transition-colors disabled:opacity-50"
-        >
-          {busy ? 'Reading…' : 'Ask again'}
-        </button>
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function UserTurn({ text, timestamp }) {
+  // Plain serif text. No card chrome. The user's voice in the thread shouldn't
+  // visually compete with Claude's reflection cards — user text reads as
+  // continuous writing, like the journal entry itself.
+  return (
+    <div className="pl-6 border-l border-neutral-900">
+      <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-neutral-600 mb-2">
+        You
       </div>
+      <p className="font-serif text-[15px] leading-[1.8] text-neutral-300 whitespace-pre-wrap">
+        {text}
+      </p>
+      {timestamp && (
+        <div className="mt-3 font-mono text-[10px] text-neutral-700">
+          {new Date(timestamp).toLocaleString(undefined, {
+            month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+          })}
+        </div>
+      )}
     </div>
   );
 }

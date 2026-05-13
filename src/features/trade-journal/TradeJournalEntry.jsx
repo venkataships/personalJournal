@@ -313,11 +313,11 @@ export default function TradeJournalEntry() {
       <div className="relative mx-auto max-w-2xl px-5 py-10 sm:px-8 sm:py-14">
         <header className="mb-10">
           <Link
-            to="/"
+            to="/trading"
             className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-[0.22em] text-neutral-500 hover:text-emerald-400 transition-colors"
           >
             <ArrowLeft className="h-3 w-3" strokeWidth={2} />
-            Dashboard
+            Trading
           </Link>
           <h1 className="mt-4 text-3xl font-light tracking-tight text-neutral-100 sm:text-4xl">
             Log a trade entry
