@@ -89,46 +89,24 @@ async function fetchPrices(tickers) {
   const unique = [...new Set(tickers.map((t) => t.toUpperCase()))];
   const symbols = unique.join(',');
 
-  // Always calls /api/quotes (Vercel serverless function) — Public's API
-  // requires a Bearer token that must stay server-side, so this can't be
-  // called directly from the browser.
-  //
-  // LOCALHOST: run `vercel dev` instead of `npm run dev` so the function
-  // executes locally. `npm run dev` won't have /api/quotes available.
+  // Calls /api/quotes (Vercel serverless function).
+  // Returns { AAPL: { price, changePct, bid, ask, volume, timestamp }, ... }
   const url = `/api/quotes?symbols=${symbols}`;
 
   try {
     const res = await fetch(url, { headers: { Accept: 'application/json' } });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(`Quote fetch HTTP ${res.status}: ${err.error || err.detail || ''}`);
+      throw new Error(`Quote fetch HTTP ${res.status}: ${err.error || ''}`);
     }
-
     const data = await res.json();
-    // Public returns: { quotes: [{ instrument: { symbol }, last, oneDayChange: { percentChange } }] }
-    const quotes = data?.quotes || [];
     const map = new Map();
-    for (const q of quotes) {
-      const sym = q?.instrument?.symbol?.toUpperCase();
-      if (!sym || q.outcome !== 'SUCCESS') continue;
-
-      const price = parseFloat(q.last) || null;
-
-      // Public's oneDayChange.percentChange is sometimes missing or empty.
-      // Fall back to computing from previousClose if needed.
-      let changePct = null;
-      const raw = q.oneDayChange?.percentChange;
-      if (raw != null && raw !== '' && !isNaN(parseFloat(raw))) {
-        changePct = parseFloat(raw);
-      } else if (price != null && q.previousClose) {
-        const prev = parseFloat(q.previousClose);
-        if (prev > 0) changePct = ((price - prev) / prev) * 100;
-      }
-
-      map.set(sym, {
-        price,
-        changePct: changePct != null ? Math.round(changePct * 100) / 100 : null,
-        name: sym,
+    for (const [sym, q] of Object.entries(data)) {
+      if (!q || q.price == null) continue;
+      map.set(sym.toUpperCase(), {
+        price:     q.price,
+        changePct: q.changePct,
+        name:      sym,
       });
     }
     return map;
