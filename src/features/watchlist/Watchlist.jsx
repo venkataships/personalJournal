@@ -11,6 +11,7 @@ import {
   Briefcase,
   ChevronDown,
   ChevronUp,
+  Search,
 } from 'lucide-react';
 import { supabase, authReady } from '../../lib/supabase';
 
@@ -81,7 +82,8 @@ export default function Watchlist() {
   const [items, setItems] = useState([]);
   const [positionTickers, setPositionTickers] = useState(new Set());
   const [activeCategory, setActiveCategory] = useState(null);
-  const [modal, setModal] = useState(null); // null | { mode: 'add' | 'edit', row?: {} }
+  const [modal, setModal] = useState(null);
+  const [search, setSearch] = useState(''); // null | { mode: 'add' | 'edit', row?: {} }
 
   const load = useCallback(async () => {
     setError(null);
@@ -196,14 +198,36 @@ export default function Watchlist() {
                 {items.length} active ticker{items.length !== 1 ? 's' : ''} across {categories.length} group{categories.length !== 1 ? 's' : ''}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={openAdd}
-              className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-[12px] font-medium uppercase tracking-[0.12em] text-emerald-200 hover:bg-emerald-500/15 hover:border-emerald-500/60 transition-colors active:scale-[0.98] shrink-0"
-            >
-              <Plus className="h-3.5 w-3.5" strokeWidth={2.25} />
-              Add ticker
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Search */}
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-neutral-500" strokeWidth={2} />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value.toUpperCase())}
+                  placeholder="Search ticker…"
+                  className="w-36 rounded-md border border-neutral-800 bg-neutral-950/60 pl-8 pr-3 py-2 text-[12px] font-mono uppercase text-neutral-100 placeholder:normal-case placeholder:text-neutral-600 focus:border-emerald-500/60 focus:outline-none focus:ring-1 focus:ring-emerald-500/40 transition-colors"
+                />
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => setSearch('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-600 hover:text-neutral-300"
+                  >
+                    <X className="h-3 w-3" strokeWidth={2} />
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={openAdd}
+                className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-[12px] font-medium uppercase tracking-[0.12em] text-emerald-200 hover:bg-emerald-500/15 hover:border-emerald-500/60 transition-colors active:scale-[0.98]"
+              >
+                <Plus className="h-3.5 w-3.5" strokeWidth={2.25} />
+                Add ticker
+              </button>
+            </div>
           </div>
 
           {error && (
@@ -220,46 +244,76 @@ export default function Watchlist() {
           <EmptyState onAdd={openAdd} />
         ) : (
           <>
-            {/* Category tabs */}
-            <div className="mb-6 flex items-end gap-1 overflow-x-auto pb-px scrollbar-none">
-              {categories.map((cat) => (
-                <button
-                  key={cat}
-                  type="button"
-                  onClick={() => setActiveCategory(cat)}
-                  className={`shrink-0 rounded-t-md border-t border-l border-r px-4 py-2 text-[12px] font-medium uppercase tracking-[0.15em] transition-colors ${
-                    activeCategory === cat
-                      ? 'border-neutral-700 bg-neutral-900 text-emerald-300'
-                      : 'border-neutral-800/60 bg-neutral-950/40 text-neutral-500 hover:text-neutral-300'
-                  }`}
-                >
-                  {cat}
-                  <span className={`ml-2 font-mono text-[10px] ${activeCategory === cat ? 'text-emerald-400/70' : 'text-neutral-700'}`}>
-                    {countFor(cat)}
-                  </span>
-                </button>
-              ))}
-            </div>
-
-            {/* Ticker table */}
-            <div className="rounded-md rounded-tl-none border border-neutral-800 bg-neutral-950/40 overflow-hidden">
-              <TickerTableHeader />
-              {visibleItems.length === 0 ? (
-                <div className="px-4 py-8 text-center text-[13px] text-neutral-600">
-                  No tickers in this group.
+            {search ? (
+              /* ── Search results — cross-category, no tabs ── */
+              <div className="rounded-md border border-neutral-800 bg-neutral-950/40 overflow-hidden">
+                <TickerTableHeader showCategory />
+                {items
+                  .filter((r) => r.ticker.toUpperCase().includes(search))
+                  .length === 0 ? (
+                  <div className="px-4 py-8 text-center text-[13px] text-neutral-600">
+                    No tickers match "{search}".
+                  </div>
+                ) : (
+                  items
+                    .filter((r) => r.ticker.toUpperCase().includes(search))
+                    .map((row) => (
+                      <TickerRow
+                        key={row.id}
+                        row={row}
+                        inPositions={positionTickers.has(row.ticker.toUpperCase())}
+                        showCategory
+                        onEdit={() => openEdit(row)}
+                        onDelete={() => onSoftDelete(row)}
+                      />
+                    ))
+                )}
+              </div>
+            ) : (
+              <>
+                {/* Category tabs */}
+                <div className="mb-6 flex items-end gap-1 overflow-x-auto pb-px scrollbar-none">
+                  {categories.map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setActiveCategory(cat)}
+                      className={`shrink-0 rounded-t-md border-t border-l border-r px-4 py-2 text-[12px] font-medium uppercase tracking-[0.15em] transition-colors ${
+                        activeCategory === cat
+                          ? 'border-neutral-700 bg-neutral-900 text-emerald-300'
+                          : 'border-neutral-800/60 bg-neutral-950/40 text-neutral-500 hover:text-neutral-300'
+                      }`}
+                    >
+                      {cat}
+                      <span className={`ml-2 font-mono text-[10px] ${activeCategory === cat ? 'text-emerald-400/70' : 'text-neutral-700'}`}>
+                        {countFor(cat)}
+                      </span>
+                    </button>
+                  ))}
                 </div>
-              ) : (
-                visibleItems.map((row) => (
-                  <TickerRow
-                    key={row.id}
-                    row={row}
-                    inPositions={positionTickers.has(row.ticker.toUpperCase())}
-                    onEdit={() => openEdit(row)}
-                    onDelete={() => onSoftDelete(row)}
-                  />
-                ))
-              )}
-            </div>
+
+                {/* Ticker table */}
+                <div className="rounded-md rounded-tl-none border border-neutral-800 bg-neutral-950/40 overflow-hidden">
+                  <TickerTableHeader showCategory={activeCategory === 'daily'} />
+                  {visibleItems.length === 0 ? (
+                    <div className="px-4 py-8 text-center text-[13px] text-neutral-600">
+                      No tickers in this group.
+                    </div>
+                  ) : (
+                    visibleItems.map((row) => (
+                      <TickerRow
+                        key={`${activeCategory}-${row.id}`}
+                        row={row}
+                        inPositions={positionTickers.has(row.ticker.toUpperCase())}
+                        showCategory={activeCategory === 'daily'}
+                        onEdit={() => openEdit(row)}
+                        onDelete={() => onSoftDelete(row)}
+                      />
+                    ))
+                  )}
+                </div>
+              </>
+            )}
           </>
         )}
 
@@ -288,10 +342,15 @@ export default function Watchlist() {
 // Table
 // ---------------------------------------------------------------------------
 
-function TickerTableHeader() {
+function TickerTableHeader({ showCategory }) {
   return (
-    <div className="hidden sm:grid grid-cols-[1fr_2.5fr_1fr_1fr_1.2fr_auto] items-center gap-4 px-5 py-2.5 border-b border-neutral-800 text-[10px] font-medium uppercase tracking-[0.18em] text-neutral-500">
+    <div className={`hidden sm:grid items-center gap-4 px-5 py-2.5 border-b border-neutral-800 text-[10px] font-medium uppercase tracking-[0.18em] text-neutral-500 ${
+      showCategory
+        ? 'grid-cols-[1fr_0.5fr_2fr_1fr_1fr_1.2fr_auto]'
+        : 'grid-cols-[1fr_2.5fr_1fr_1fr_1.2fr_auto]'
+    }`}>
       <div>Ticker</div>
+      {showCategory && <div>Group</div>}
       <div>Thesis</div>
       <div>Stage</div>
       <div>Timeframe</div>
@@ -301,14 +360,17 @@ function TickerTableHeader() {
   );
 }
 
-function TickerRow({ row, inPositions, onEdit, onDelete }) {
+function TickerRow({ row, inPositions, showCategory, onEdit, onDelete }) {
   const [expanded, setExpanded] = useState(false);
   const longThesis = row.thesis && row.thesis.length > 80;
 
   return (
     <div className="border-b border-neutral-900 last:border-b-0">
-      {/* Main row */}
-      <div className="grid grid-cols-2 sm:grid-cols-[1fr_2.5fr_1fr_1fr_1.2fr_auto] items-start gap-4 px-5 py-3.5 text-[13px]">
+      <div className={`grid items-start gap-4 px-5 py-3.5 text-[13px] grid-cols-2 ${
+        showCategory
+          ? 'sm:grid-cols-[1fr_0.5fr_2fr_1fr_1fr_1.2fr_auto]'
+          : 'sm:grid-cols-[1fr_2.5fr_1fr_1fr_1.2fr_auto]'
+      }`}>
         {/* Ticker + sentiment */}
         <div className="flex items-center gap-2 col-span-2 sm:col-span-1">
           <span className="text-base leading-none">{sentimentEmoji(row.sentiment)}</span>
@@ -324,6 +386,15 @@ function TickerRow({ row, inPositions, onEdit, onDelete }) {
             </span>
           )}
         </div>
+
+        {/* Category badge — only in daily tab or search results */}
+        {showCategory && (
+          <div className="hidden sm:flex items-start">
+            <span className="rounded-full border border-neutral-700 bg-neutral-900 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-neutral-400">
+              {row.category || 'N/A'}
+            </span>
+          </div>
+        )}
 
         {/* Thesis — truncated, expandable */}
         <div className="col-span-2 sm:col-span-1">
