@@ -55,10 +55,9 @@ function truncate(text, len = 80) {
 async function fetchWatchlist() {
   await authReady();
   const { data, error } = await supabase
-    .from('watchlist')
+    .from('watchlist_with_daily')
     .select('*')
-    .eq('is_active', true)
-    .order('category', { ascending: true })
+    .order('display_category', { ascending: true })
     .order('ticker', { ascending: true });
   if (error) throw error;
   return data || [];
@@ -103,10 +102,11 @@ export default function Watchlist() {
     return () => { cancelled = true; };
   }, [load]);
 
-  // Derive categories from data. Preserve encounter order but sort alpha.
+  // Derive categories from display_category. Pin 'daily' first, rest alpha.
   const categories = useMemo(() => {
-    const cats = [...new Set(items.map((r) => r.category || 'Uncategorized'))].sort();
-    return cats;
+    const cats = [...new Set(items.map((r) => r.display_category || r.category || 'Uncategorized'))];
+    const others = cats.filter((c) => c !== 'daily').sort();
+    return cats.includes('daily') ? ['daily', ...others] : others;
   }, [items]);
 
   // Auto-select first category when data loads.
@@ -122,14 +122,15 @@ export default function Watchlist() {
 
   const visibleItems = useMemo(() => {
     if (!activeCategory) return [];
-    const target = activeCategory === 'Uncategorized' ? null : activeCategory;
-    return items.filter((r) => (r.category || null) === target);
+    return items.filter((r) =>
+      (r.display_category || r.category || 'Uncategorized') === activeCategory
+    );
   }, [items, activeCategory]);
 
-  const countFor = (cat) => {
-    const target = cat === 'Uncategorized' ? null : cat;
-    return items.filter((r) => (r.category || null) === target).length;
-  };
+  const countFor = (cat) =>
+    items.filter((r) =>
+      (r.display_category || r.category || 'Uncategorized') === cat
+    ).length;
 
   const openAdd  = () => setModal({ mode: 'add' });
   const openEdit = (row) => setModal({ mode: 'edit', row });
@@ -307,6 +308,9 @@ function TickerRow({ row, inPositions, onEdit, onDelete }) {
           <span className="font-mono font-semibold uppercase tracking-wider text-neutral-100">
             {row.ticker}
           </span>
+          {row.in_daily_focus && (
+            <span title="In weekly focus" className="text-base leading-none">🎯</span>
+          )}
           {inPositions && (
             <span title="In positions" className="inline-flex items-center gap-0.5 rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-300">
               <Briefcase className="h-2.5 w-2.5" strokeWidth={2} />
@@ -332,7 +336,13 @@ function TickerRow({ row, inPositions, onEdit, onDelete }) {
               )}
             </button>
           )}
-          {/* Tags — shown on mobile as chips, desktop inline */}
+          {/* Focus reason — shown when ticker is in weekly focus */}
+          {row.focus_reason && (
+            <p className="mt-1.5 text-[12px] text-amber-400/80 italic">
+              🎯 {row.focus_reason}
+            </p>
+          )}
+          {/* Tags */}
           {row.tags && (
             <div className="mt-1.5 flex flex-wrap gap-1">
               {row.tags.split(',').map((t) => t.trim()).filter(Boolean).map((tag) => (
