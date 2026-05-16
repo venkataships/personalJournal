@@ -271,25 +271,42 @@ export default function Watchlist() {
               </div>
             ) : (
               <>
-                {/* Category tabs */}
-                <div className="mb-6 flex items-end gap-1 overflow-x-auto pb-px scrollbar-none">
-                  {categories.map((cat) => (
-                    <button
-                      key={cat}
-                      type="button"
-                      onClick={() => setActiveCategory(cat)}
-                      className={`shrink-0 rounded-t-md border-t border-l border-r px-4 py-2 text-[12px] font-medium uppercase tracking-[0.15em] transition-colors ${
-                        activeCategory === cat
-                          ? 'border-neutral-700 bg-neutral-900 text-emerald-300'
-                          : 'border-neutral-800/60 bg-neutral-950/40 text-neutral-500 hover:text-neutral-300'
-                      }`}
+                {/* Category tabs — dropdown on mobile, scrollable tabs on desktop */}
+                <div className="mb-6">
+                  {/* Mobile: native select dropdown */}
+                  <div className="sm:hidden">
+                    <select
+                      value={activeCategory || ''}
+                      onChange={(e) => setActiveCategory(e.target.value)}
+                      className="w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2.5 text-[13px] font-medium uppercase tracking-[0.12em] text-emerald-300 focus:border-emerald-500/60 focus:outline-none"
                     >
-                      {cat}
-                      <span className={`ml-2 font-mono text-[10px] ${activeCategory === cat ? 'text-emerald-400/70' : 'text-neutral-700'}`}>
-                        {countFor(cat)}
-                      </span>
-                    </button>
-                  ))}
+                      {categories.map((cat) => (
+                        <option key={cat} value={cat}>
+                          {cat} ({countFor(cat)})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {/* Desktop: scrollable tabs */}
+                  <div className="hidden sm:flex items-end gap-1 overflow-x-auto pb-2" style={{ scrollbarWidth: 'thin', scrollbarColor: '#404040 transparent' }}>
+                    {categories.map((cat) => (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => setActiveCategory(cat)}
+                        className={`shrink-0 rounded-t-md border-t border-l border-r px-4 py-2 text-[12px] font-medium uppercase tracking-[0.15em] transition-colors ${
+                          activeCategory === cat
+                            ? 'border-neutral-700 bg-neutral-900 text-emerald-300'
+                            : 'border-neutral-800/60 bg-neutral-950/40 text-neutral-500 hover:text-neutral-300'
+                        }`}
+                      >
+                        {cat}
+                        <span className={`ml-2 font-mono text-[10px] ${activeCategory === cat ? 'text-emerald-400/70' : 'text-neutral-700'}`}>
+                          {countFor(cat)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Ticker table */}
@@ -709,9 +726,12 @@ function CategoryCombobox({ value, onChange, options }) {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const filtered = options.filter(
-    (o) => o.toLowerCase().includes(value.toLowerCase()) && o.toLowerCase() !== value.toLowerCase()
-  );
+  // Filter out 'daily' — that's system-managed, not user-assignable.
+  // When value is empty show all options; when typing, filter to matches
+  // but keep the exact match visible so user can confirm their own new group.
+  const filtered = options
+    .filter((o) => o !== 'daily')
+    .filter((o) => !value || o.toLowerCase().includes(value.toLowerCase()));
 
   return (
     <div ref={ref} className="relative">
@@ -724,7 +744,7 @@ function CategoryCombobox({ value, onChange, options }) {
         className={inputCls}
       />
       {open && filtered.length > 0 && (
-        <ul className="absolute left-0 top-full z-10 mt-1 w-full rounded border border-neutral-700 bg-[#111] shadow-xl">
+        <ul className="absolute left-0 top-full z-10 mt-1 w-full max-h-56 overflow-y-auto rounded border border-neutral-700 bg-[#111] shadow-xl">
           {filtered.map((opt) => (
             <li key={opt}>
               <button
