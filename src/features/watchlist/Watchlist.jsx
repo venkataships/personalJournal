@@ -57,7 +57,6 @@ async function fetchWatchlist() {
   const { data, error } = await supabase
     .from('watchlist_with_daily')
     .select('*')
-    .order('display_category', { ascending: true })
     .order('ticker', { ascending: true });
   if (error) throw error;
   return data || [];
@@ -102,19 +101,32 @@ export default function Watchlist() {
     return () => { cancelled = true; };
   }, [load]);
 
-  // Derive categories from display_category. Pin 'daily' first, rest alpha.
-  const categories = useMemo(() => {
-    const cats = [...new Set(items.map((r) => r.display_category || r.category || 'Uncategorized'))];
-    const others = cats.filter((c) => c !== 'daily').sort();
-    return cats.includes('daily') ? ['daily', ...others] : others;
+  // Build groups: real category groups + synthetic 'daily' from in_daily_focus.
+  // Same row object appears in both — no copies, no duplication.
+  const groups = useMemo(() => {
+    const g = {};
+    for (const item of items) {
+      const cat = item.category || 'Uncategorized';
+      if (!g[cat]) g[cat] = [];
+      g[cat].push(item);
+    }
+    const daily = items.filter((r) => r.in_daily_focus);
+    if (daily.length > 0) g['daily'] = daily;
+    return g;
   }, [items]);
+
+  // daily pinned first, rest alphabetical
+  const categories = useMemo(() => {
+    const keys = Object.keys(groups);
+    const others = keys.filter((k) => k !== 'daily').sort();
+    return keys.includes('daily') ? ['daily', ...others] : others;
+  }, [groups]);
 
   // Auto-select first category when data loads.
   useEffect(() => {
     if (categories.length > 0 && !activeCategory) {
       setActiveCategory(categories[0]);
     }
-    // If the active category disappears (all tickers removed), fall back.
     if (activeCategory && categories.length > 0 && !categories.includes(activeCategory)) {
       setActiveCategory(categories[0]);
     }
@@ -122,15 +134,10 @@ export default function Watchlist() {
 
   const visibleItems = useMemo(() => {
     if (!activeCategory) return [];
-    return items.filter((r) =>
-      (r.display_category || r.category || 'Uncategorized') === activeCategory
-    );
-  }, [items, activeCategory]);
+    return groups[activeCategory] || [];
+  }, [groups, activeCategory]);
 
-  const countFor = (cat) =>
-    items.filter((r) =>
-      (r.display_category || r.category || 'Uncategorized') === cat
-    ).length;
+  const countFor = (cat) => (groups[cat] || []).length;
 
   const openAdd  = () => setModal({ mode: 'add' });
   const openEdit = (row) => setModal({ mode: 'edit', row });
