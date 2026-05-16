@@ -412,63 +412,64 @@ function WatchlistModal({ mode, row, existingCategories, allItems, onSaved, onCa
 
   const tickerUpper = form.ticker.toUpperCase().trim();
 
-  const validate = useCallback(() => {
-    if (!tickerUpper) return 'Ticker is required.';
-    if (!form.category.trim()) return 'Group is required.';
-    // Unique-ticker-across-groups check (UI-level; DB also enforces via partial index)
-    if (mode === 'add') {
-      const conflict = allItems.find(
-        (r) => r.ticker.toUpperCase() === tickerUpper && r.is_active
-      );
-      if (conflict) {
-        return `${tickerUpper} is already in group ${conflict.category || 'Uncategorized'}. Remove it first.`;
-      }
-    }
-    if (mode === 'edit' && row) {
-      const conflict = allItems.find(
-        (r) =>
-          r.ticker.toUpperCase() === tickerUpper &&
-          r.is_active &&
-          r.id !== row.id
-      );
-      if (conflict) {
-        return `${tickerUpper} is already in group ${conflict.category || 'Uncategorized'}. Remove it first.`;
-      }
-    }
-    return null;
-  }, [tickerUpper, form.category, allItems, mode, row]);
-
   const onSave = async () => {
-    const validationError = validate();
-    if (validationError) { setFieldError(validationError); return; }
+    // Basic field validation — no conflict blocking
+    if (!tickerUpper) { setFieldError('Ticker is required.'); return; }
+    if (!form.category.trim()) { setFieldError('Group is required.'); return; }
+
     setSaving(true);
+    setFieldError('');
     try {
       await authReady();
       const payload = {
-        ticker:    tickerUpper,
-        category:  form.category.trim(),
-        sentiment: form.sentiment,
-        thesis:    form.thesis.trim() || null,
-        stage:     form.stage.trim()  || null,
-        timeframe: form.timeframe.trim() || null,
-        source:    form.source.trim() || null,
-        tags:      form.tags.trim()   || null,
-        is_active: true,
+        ticker:     tickerUpper,
+        category:   form.category.trim(),
+        sentiment:  form.sentiment,
+        thesis:     form.thesis.trim()     || null,
+        stage:      form.stage.trim()      || null,
+        timeframe:  form.timeframe.trim()  || null,
+        source:     form.source.trim()     || null,
+        tags:       form.tags.trim()       || null,
+        is_active:  true,
         updated_at: new Date().toISOString(),
       };
-      const q = mode === 'add'
-        ? supabase.from('watchlist').insert(payload)
-        : supabase.from('watchlist').update(payload).eq('id', row.id);
-      const { error: err } = await q;
-      if (err) {
-        // Supabase unique violation
-        if (err.code === '23505') {
-          setFieldError(`${tickerUpper} already exists in the watchlist.`);
+
+      if (mode === 'edit') {
+        // Straightforward update on the known row
+        const { error: err } = await supabase
+          .from('watchlist').update(payload).eq('id', row.id);
+        if (err) throw err;
+      } else {
+        // Add mode — check if ticker already exists in a different group
+        const conflict = allItems.find(
+          (r) => r.ticker.toUpperCase() === tickerUpper && r.is_active
+        );
+        if (conflict) {
+          // Move: update the existing row's group (and all other fields) in place.
+          // No delete, no re-insert — cleaner and preserves row history.
+          const { error: err } = await supabase
+            .from('watchlist').update(payload).eq('id', conflict.id);
+          if (err) throw err;
         } else {
-          throw err;
+          // Fresh insert
+          const { error: err } = await supabase
+            .from('watchlist').insert(payload);
+          if (err) {
+            if (err.code === '23505') {
+              // Race condition — another insert snuck in, fall back to update
+              const { error: err2 } = await supabase
+                .from('watchlist')
+                .update(payload)
+                .eq('ticker', tickerUpper)
+                .eq('is_active', true);
+              if (err2) throw err2;
+            } else {
+              throw err;
+            }
+          }
         }
-        return;
       }
+
       onSaved(payload.category);
     } catch (e) {
       setError(e.message || 'Save failed.');
