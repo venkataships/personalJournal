@@ -235,43 +235,141 @@ Structure your brief:
 Keep it tight. This is a pre-market brief, not a report.`;
 }
 
-function buildSectorPrompt(d) {
-  return `Generate a sector rotation analysis using this data:
+// ---------------------------------------------------------------------------
+// Shared sector heat builder — used by both Sector Analysis and Pulse.
+// Macro pinned first, then hottest → coldest for the rest.
+// ---------------------------------------------------------------------------
 
-ACTIVE CATALYSTS (trader's monitored themes):
+function buildSectorHeatBlock(watchlist, priceMap) {
+  const byCategory = {};
+  for (const w of watchlist) {
+    const cat = w.category || 'Uncategorized';
+    if (!byCategory[cat]) byCategory[cat] = [];
+    byCategory[cat].push(w.ticker);
+  }
+
+  const priceLine = (ticker) => {
+    const q = priceMap?.get(ticker.toUpperCase());
+    if (!q || q.price == null) return `${ticker} (no price)`;
+    const sign = (q.changePct ?? 0) >= 0 ? '+' : '';
+    const pct  = q.changePct != null ? `${sign}${q.changePct.toFixed(2)}%` : 'chg N/A';
+    return `${ticker} $${q.price.toFixed(2)} (${pct})`;
+  };
+
+  const rows = Object.entries(byCategory).map(([cat, tickers]) => {
+    const changes = tickers
+      .map((t) => priceMap?.get(t.toUpperCase())?.changePct)
+      .filter((c) => c != null && Number.isFinite(c));
+    const avg = changes.length
+      ? changes.reduce((s, c) => s + c, 0) / changes.length
+      : null;
+    const avgStr = avg != null
+      ? (avg >= 0 ? `+${avg.toFixed(2)}` : avg.toFixed(2)) + '%'
+      : 'no price data';
+    const tickerLines = tickers.map(priceLine).join(' | ');
+    return { cat, avg: avg ?? null, avgStr, tickerLines, count: tickers.length };
+  });
+
+  // Macro pinned first, rest sorted hottest → coldest (nulls last)
+  const macro = rows.find((r) => r.cat.toLowerCase() === 'macro');
+  const others = rows
+    .filter((r) => r.cat.toLowerCase() !== 'macro')
+    .sort((a, b) => {
+      if (a.avg == null && b.avg == null) return 0;
+      if (a.avg == null) return 1;
+      if (b.avg == null) return -1;
+      return b.avg - a.avg;
+    });
+
+  const ordered = macro ? [macro, ...others] : others;
+
+  return ordered
+    .map(({ cat, avgStr, tickerLines, count }) =>
+      `${cat.toUpperCase()} (${count} tickers, avg ${avgStr})\n  ${tickerLines}`)
+    .join('\n\n');
+}
+
+// ---------------------------------------------------------------------------
+// Compact one-line group summary — used as the header line in Pulse
+// ---------------------------------------------------------------------------
+
+function buildGroupSummaryLine(watchlist, priceMap) {
+  const byCategory = {};
+  for (const w of watchlist) {
+    const cat = w.category || 'Uncategorized';
+    if (!byCategory[cat]) byCategory[cat] = [];
+    byCategory[cat].push(w.ticker);
+  }
+
+  const rows = Object.entries(byCategory).map(([cat, tickers]) => {
+    const changes = tickers
+      .map((t) => priceMap?.get(t.toUpperCase())?.changePct)
+      .filter((c) => c != null && Number.isFinite(c));
+    const avg = changes.length
+      ? changes.reduce((s, c) => s + c, 0) / changes.length
+      : null;
+    return { cat, avg };
+  });
+
+  const macro = rows.find((r) => r.cat.toLowerCase() === 'macro');
+  const others = rows
+    .filter((r) => r.cat.toLowerCase() !== 'macro')
+    .sort((a, b) => {
+      if (a.avg == null && b.avg == null) return 0;
+      if (a.avg == null) return 1;
+      if (b.avg == null) return -1;
+      return b.avg - a.avg;
+    });
+
+  const ordered = macro ? [macro, ...others] : others;
+
+  return ordered
+    .map(({ cat, avg }) => {
+      if (avg == null) return `${cat}: —`;
+      const sign = avg >= 0 ? '+' : '';
+      return `${cat} ${sign}${avg.toFixed(2)}%`;
+    })
+    .join(' | ');
+}
+
+function buildSectorPrompt(d) {
+  // Sector Analysis uses watchlist data for group heat but no live prices
+  // (prices are only fetched for Watchlist Pulse). Pass null priceMap —
+  // the helper degrades gracefully to show tickers without % data.
+  const heatBlock = buildSectorHeatBlock(d.watchlist, null);
+
+  return `Generate a sector analysis based on this trader's watchlist groups.
+
+WATCHLIST GROUP OVERVIEW (Macro first, then by group):
+${heatBlock}
+
+ACTIVE CATALYSTS:
 ${fmtCatalysts(d.catalysts)}
 
-CURRENT POSITIONS BY SECTOR:
+CURRENT POSITIONS:
 ${fmtPositions(d.positions)}
 
-WATCHLIST BY CATEGORY:
-${fmtWatchlistByCategory(d.watchlist)}
+Note: Live prices are not available for this brief. Analyse based on
+watchlist composition, catalyst themes, and group size/conviction.
 
-Note: Live intraday prices are not available in this context. Base your sector
-analysis on catalyst themes, positioning, and watchlist composition.
+Produce exactly this format — tight, no filler:
 
-Structure your analysis:
+📊 SECTOR ANALYSIS
 
-🔬 CATALYST-DRIVEN SECTORS
-- Which sectors have active catalysts? Is positioning aligned?
-- Nuclear: ${fmtTickersByCategory(d.watchlist, 'nuclear')}
-- AI-Infra: ${fmtTickersByCategory(d.watchlist, 'ai-infra')}
-- Quantum: ${fmtTickersByCategory(d.watchlist, 'quantum')}
+🌐 MACRO CONTEXT
+[Start here. What is the macro group signalling? What tickers are in it and what does the composition tell you about the trader's macro view?]
+[One paragraph, 3-4 sentences max.]
 
-📊 SECTOR ROTATION CONTEXT
-- Based on catalyst strength and recency, which sectors have tailwinds?
-- Which are catalyst-exhausted or have no near-term drivers?
-- What is the positioning telling us about conviction?
+🔥 GROUP HEAT (your watchlist)
+[For each group in order: name, number of tickers, one sentence on the thesis/theme. Flag which groups have the most catalyst coverage.]
+[Skip groups with 1-2 tickers — too thin to be meaningful.]
 
-💼 POSITIONING ASSESSMENT
-- Where is the portfolio well-positioned relative to active catalysts?
-- Any watchlist names you don't hold that align with the strongest catalysts?
+💼 POSITIONING VS WATCHLIST
+[Where are held positions concentrated relative to the watchlist groups?]
+[Any groups heavily watched but underweight in actual positions?]
 
-⚡ ACTIONABLE SETUPS
-- 2-3 specific tickers from the watchlist with catalyst alignment
-- Entry thesis in one sentence each
-
-Swing trader context: 2-10 day holds, need catalyst + sector confirmation before entry.`;
+⚡ HIGHEST CONVICTION GROUP TODAY
+[Based on catalyst coverage + watchlist depth, which single group has the most going for it right now? Name it, explain why in 2 sentences.]`;
 }
 
 function buildPulsePrompt(d, priceMap) {
@@ -279,43 +377,11 @@ function buildPulsePrompt(d, priceMap) {
     weekday: 'long', month: 'short', day: 'numeric',
   });
 
-  // ── Per-ticker price line ─────────────────────────────────────────────────
-  const priceLine = (ticker) => {
-    const q = priceMap.get(ticker.toUpperCase());
-    if (!q || q.price == null) return null;
-    const sign = (q.changePct ?? 0) >= 0 ? '+' : '';
-    const pct  = q.changePct != null ? `${sign}${q.changePct.toFixed(2)}%` : 'chg N/A';
-    return `${ticker} $${q.price.toFixed(2)} (${pct})`;
-  };
+  // Full heat block for Sector Analysis section
+  const heatBlock = buildSectorHeatBlock(d.watchlist, priceMap);
 
-  // ── Sector heat map ───────────────────────────────────────────────────────
-  const byCategory = {};
-  for (const w of d.watchlist) {
-    const cat = w.category || 'Uncategorized';
-    if (!byCategory[cat]) byCategory[cat] = [];
-    byCategory[cat].push(w.ticker);
-  }
-
-  const sectorRows = Object.entries(byCategory)
-    .map(([cat, tickers]) => {
-      const changes = tickers
-        .map((t) => priceMap.get(t.toUpperCase())?.changePct)
-        .filter((c) => c != null && Number.isFinite(c));
-      const avg = changes.length
-        ? changes.reduce((s, c) => s + c, 0) / changes.length
-        : null;
-      const lines = tickers.map(priceLine).filter(Boolean).join(' | ');
-      const avgStr = avg != null
-        ? (avg >= 0 ? `+${avg.toFixed(2)}` : avg.toFixed(2)) + '%'
-        : 'no data';
-      return { cat, avg: avg ?? -999, avgStr, lines };
-    })
-    .sort((a, b) => b.avg - a.avg);
-
-  const heatBlock = sectorRows
-    .map(({ cat, avgStr, lines }) =>
-      `${cat.toUpperCase()} avg ${avgStr}\n  ${lines || '(no price data)'}`)
-    .join('\n\n');
+  // Compact one-liner for the header
+  const groupSummary = buildGroupSummaryLine(d.watchlist, priceMap);
 
   // ── All tickers ranked by % change ───────────────────────────────────────
   const allRanked = d.watchlist
@@ -344,7 +410,10 @@ function buildPulsePrompt(d, priceMap) {
 
   return `Watchlist market pulse for ${today}.
 
-SECTOR HEAT MAP (hottest to coldest):
+GROUP SUMMARY (Macro first, then hottest → coldest):
+${groupSummary}
+
+FULL GROUP BREAKDOWN:
 ${heatBlock}
 
 TOP 5 GAINERS TODAY:
@@ -353,25 +422,24 @@ ${gainersBlock}
 TOP 5 LOSERS TODAY:
 ${losersBlock}
 
-Based on this data, produce exactly this format — tight, no filler:
+Produce exactly this format — tight, no filler:
 
 📊 WATCHLIST PULSE — ${today}
 
-🔥 SECTOR HEAT
-[3-4 lines. Name the hottest and coldest sectors with their avg move.
-Flag if an entire sector is green or red — that is a real sector move, not single-stock noise.
-One sentence on what the rotation is telling you.]
+🌐 GROUP HEAT (Macro first)
+[One line per group: name, avg % change, 1-2 notable tickers. Macro always first.]
+[Call out any group where the entire group is green or red — real sector move.]
+[3-5 lines total — skip thin groups with 1-2 tickers.]
 
 🟢 TOP GAINERS
-[Each of the top 5: ticker +X.X% — one sentence on why it might be moving based on sector/name. No generic filler.]
+[Each of the top 5: ticker +X.X% [group] — one sentence on why.]
 
 🔴 TOP LOSERS
-[Each of the bottom 5: ticker -X.X% — same format.]
+[Each of the bottom 5: ticker -X.X% [group] — one sentence on why.]
 
 ⚡ ONE SETUP
-[The single most interesting ticker today based purely on the price action. One sentence. Be specific about price level.]`;
+[The single most interesting ticker today. One sentence. Specific price level.]`;
 }
-
 
 // ---------------------------------------------------------------------------
 // Component
