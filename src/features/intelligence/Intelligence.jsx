@@ -332,15 +332,17 @@ function buildGroupSummaryLine(watchlist, priceMap) {
     .join(' | ');
 }
 
-function buildSectorPrompt(d) {
-  // Sector Analysis uses watchlist data for group heat but no live prices
-  // (prices are only fetched for Watchlist Pulse). Pass null priceMap —
-  // the helper degrades gracefully to show tickers without % data.
-  const heatBlock = buildSectorHeatBlock(d.watchlist, null);
+function buildSectorPrompt(d, priceMap) {
+  const hasPrices = priceMap && priceMap.size > 0;
+  const heatBlock = buildSectorHeatBlock(d.watchlist, priceMap);
+  const today = new Date().toLocaleDateString('en-US', {
+    weekday: 'long', month: 'short', day: 'numeric',
+  });
 
-  return `Generate a sector analysis based on this trader's watchlist groups.
+  return `Sector analysis for ${today} based on this trader's watchlist groups.
+${hasPrices ? 'Live prices included — use % changes to identify what is actually moving today.' : 'No live prices — analyse by watchlist composition and catalyst coverage only.'}
 
-WATCHLIST GROUP OVERVIEW (Macro first, then by group):
+WATCHLIST GROUP BREAKDOWN (Macro first, then hottest → coldest):
 ${heatBlock}
 
 ACTIVE CATALYSTS:
@@ -349,27 +351,26 @@ ${fmtCatalysts(d.catalysts)}
 CURRENT POSITIONS:
 ${fmtPositions(d.positions)}
 
-Note: Live prices are not available for this brief. Analyse based on
-watchlist composition, catalyst themes, and group size/conviction.
+Produce exactly this format — tight, specific, no filler:
 
-Produce exactly this format — tight, no filler:
+📊 SECTOR ANALYSIS — ${today}
 
-📊 SECTOR ANALYSIS
+🌐 MACRO FIRST
+[What is the macro group telling you today? Name the tickers and their moves if prices available.
+Is it risk-on (QQQ/IWM leading) or risk-off (IEF/GLD leading)? One short paragraph.]
 
-🌐 MACRO CONTEXT
-[Start here. What is the macro group signalling? What tickers are in it and what does the composition tell you about the trader's macro view?]
-[One paragraph, 3-4 sentences max.]
+🔥 GROUP HEAT
+[Each group in order, one line each: GROUP avg +X.X% — which tickers lead/lag, one sentence on what it means.
+Skip groups with no price data or fewer than 3 tickers.
+Bold the hottest and coldest groups.]
 
-🔥 GROUP HEAT (your watchlist)
-[For each group in order: name, number of tickers, one sentence on the thesis/theme. Flag which groups have the most catalyst coverage.]
-[Skip groups with 1-2 tickers — too thin to be meaningful.]
+💼 WHERE YOU'RE POSITIONED VS WHERE MOMENTUM IS
+[Which of your held positions are in the hottest groups today?
+Which groups have momentum but you're underweight or not in?
+Keep it to 3-4 specific observations.]
 
-💼 POSITIONING VS WATCHLIST
-[Where are held positions concentrated relative to the watchlist groups?]
-[Any groups heavily watched but underweight in actual positions?]
-
-⚡ HIGHEST CONVICTION GROUP TODAY
-[Based on catalyst coverage + watchlist depth, which single group has the most going for it right now? Name it, explain why in 2 sentences.]`;
+⚡ ONE TRADE IDEA
+[The single most actionable setup based on group momentum + your watchlist. Specific ticker, current price, why today.]`;
 }
 
 function buildPulsePrompt(d, priceMap) {
@@ -516,21 +517,24 @@ export default function Intelligence() {
     setBrief(brief.id, { status: 'streaming', text: '' });
 
     try {
-      // For Watchlist Pulse: fetch live prices now that we have the watchlist.
-      // Other briefs don't need prices so we skip the extra network call.
+      // Fetch live prices for Pulse and Sector Analysis — both use group heat.
+      // Morning Brief doesn't need prices.
       let priceMap = new Map();
-      if (brief.id === 'pulse' && data.watchlist.length > 0) {
+      if ((brief.id === 'pulse' || brief.id === 'sector') && data.watchlist.length > 0) {
         const tickers = data.watchlist.map((w) => w.ticker);
         priceMap = await fetchPrices(tickers);
       }
 
+      // Sector Analysis needs more tokens — large watchlists hit 1024 easily.
+      const maxTokens = brief.id === 'sector' ? 2048 : 1024;
+
       const stream = anthropic.messages.stream({
         model: CLAUDE_MODEL,
-        max_tokens: 1024,
+        max_tokens: maxTokens,
         system: brief.system,
         messages: [{
           role: 'user',
-          content: brief.id === 'pulse'
+          content: (brief.id === 'pulse' || brief.id === 'sector')
             ? brief.buildPrompt(data, priceMap)
             : brief.buildPrompt(data),
         }],
