@@ -49,6 +49,19 @@ function truncate(text, len = 80) {
   return text.length <= len ? text : text.slice(0, len).trimEnd() + '…';
 }
 
+// Monday of the current week in YYYY-MM-DD (local time).
+// Matches how the bot likely keys weekly focus entries.
+function currentWeekStart() {
+  const d = new Date();
+  const day = d.getDay(); // 0=Sun
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+
 // ---------------------------------------------------------------------------
 // Data layer
 // ---------------------------------------------------------------------------
@@ -496,7 +509,30 @@ function WatchlistModal({ mode, row, existingCategories, allItems, onSaved, onCa
   });
   const [saving, setSaving] = useState(false);
   const [fieldError, setFieldError] = useState('');
+  const [inDailyFocus, setInDailyFocus] = useState(row?.in_daily_focus ?? false);
+  const [dailyReason, setDailyReason] = useState('');
+  const [dailyFocusId, setDailyFocusId] = useState(null); // existing row id if present
   const tickerRef = useRef(null);
+
+  // Load existing daily_focus row for this ticker (to know id for update)
+  useEffect(() => {
+    if (!row?.ticker) return;
+    (async () => {
+      await authReady();
+      const { data } = await supabase
+        .from('daily_focus')
+        .select('id, reason, is_active')
+        .eq('ticker', row.ticker.toUpperCase())
+        .eq('week_start', currentWeekStart())
+        .eq('is_active', true)
+        .maybeSingle();
+      if (data) {
+        setInDailyFocus(true);
+        setDailyFocusId(data.id);
+        setDailyReason(data.reason || '');
+      }
+    })();
+  }, [row?.ticker]);
 
   // Focus ticker on mount
   useEffect(() => {
@@ -576,6 +612,29 @@ function WatchlistModal({ mode, row, existingCategories, allItems, onSaved, onCa
       }
 
       onSaved(payload.category);
+
+      // Handle daily focus toggle separately from watchlist save
+      const weekStart = currentWeekStart();
+      if (inDailyFocus) {
+        // Add or update daily_focus row
+        if (dailyFocusId) {
+          await supabase.from('daily_focus')
+            .update({ reason: dailyReason || null, is_active: true })
+            .eq('id', dailyFocusId);
+        } else {
+          await supabase.from('daily_focus').insert({
+            ticker: tickerUpper,
+            reason: dailyReason || null,
+            week_start: weekStart,
+            is_active: true,
+          });
+        }
+      } else if (dailyFocusId) {
+        // Soft-remove from daily focus
+        await supabase.from('daily_focus')
+          .update({ is_active: false })
+          .eq('id', dailyFocusId);
+      }
     } catch (e) {
       setError(e.message || 'Save failed.');
     } finally {
@@ -680,6 +739,43 @@ function WatchlistModal({ mode, row, existingCategories, allItems, onSaved, onCa
             <ModalField label="Tags (comma-separated)">
               <input type="text" value={form.tags} onChange={set('tags')} placeholder="AI,semis,breakout" className={inputCls} />
             </ModalField>
+          </div>
+
+          {/* Daily focus toggle */}
+          <div className={`rounded border px-4 py-3 transition-colors ${
+            inDailyFocus
+              ? 'border-amber-500/40 bg-amber-500/[0.06]'
+              : 'border-neutral-800 bg-neutral-950/40'
+          }`}>
+            <button
+              type="button"
+              onClick={() => setInDailyFocus((v) => !v)}
+              className="flex w-full items-center justify-between gap-3"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-[15px]">🎯</span>
+                <div className="text-left">
+                  <div className={`text-[13px] font-medium ${inDailyFocus ? 'text-amber-200' : 'text-neutral-400'}`}>
+                    Add to this week's daily focus
+                  </div>
+                  <div className="text-[11px] text-neutral-600">
+                    Week of {currentWeekStart()}
+                  </div>
+                </div>
+              </div>
+              <div className={`h-5 w-9 rounded-full transition-colors ${inDailyFocus ? 'bg-amber-500' : 'bg-neutral-700'}`}>
+                <div className={`h-5 w-5 rounded-full bg-white shadow transition-transform ${inDailyFocus ? 'translate-x-4' : 'translate-x-0'}`} />
+              </div>
+            </button>
+            {inDailyFocus && (
+              <input
+                type="text"
+                value={dailyReason}
+                onChange={(e) => setDailyReason(e.target.value)}
+                placeholder="Why is this a focus this week? (optional)"
+                className={`mt-3 ${inputCls}`}
+              />
+            )}
           </div>
         </div>
 
