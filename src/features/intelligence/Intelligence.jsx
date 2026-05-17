@@ -253,7 +253,8 @@ function buildSectorHeatBlock(watchlist, priceMap) {
     if (!q || q.price == null) return `${ticker} (no price)`;
     const sign = (q.changePct ?? 0) >= 0 ? '+' : '';
     const pct  = q.changePct != null ? `${sign}${q.changePct.toFixed(2)}%` : 'chg N/A';
-    return `${ticker} $${q.price.toFixed(2)} (${pct})`;
+    const tag  = q.isPreMarket ? ' [pre-mkt mid]' : '';
+    return `${ticker} $${q.price.toFixed(2)} (${pct})${tag}`;
   };
 
   const rows = Object.entries(byCategory).map(([cat, tickers]) => {
@@ -378,8 +379,11 @@ function buildPulsePrompt(d, priceMap) {
     weekday: 'long', month: 'short', day: 'numeric',
   });
 
-  // Full heat block for Sector Analysis section
-  const heatBlock = buildSectorHeatBlock(d.watchlist, priceMap);
+  // Detect if we're in pre-market mode (any ticker has isPreMarket flag)
+  const isPreMarket = [...priceMap.values()].some((q) => q.isPreMarket);
+  const marketContext = isPreMarket
+    ? 'PRE-MARKET: Prices are bid/ask midpoints vs yesterday\'s close. Treat % changes as pre-market indication, not confirmed moves.'
+    : 'MARKET HOURS: Prices are last trade prices with intraday % change.';
 
   // Compact one-liner for the header
   const groupSummary = buildGroupSummaryLine(d.watchlist, priceMap);
@@ -410,6 +414,7 @@ function buildPulsePrompt(d, priceMap) {
   const losersBlock  = bottom5.length ? bottom5.map(rankLine).join('\n') : 'No data';
 
   return `Watchlist market pulse for ${today}.
+${marketContext}
 
 GROUP SUMMARY (Macro first, then hottest → coldest):
 ${groupSummary}
