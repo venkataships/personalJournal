@@ -388,6 +388,9 @@ function buildPulsePrompt(d, priceMap) {
   // Compact one-liner for the header
   const groupSummary = buildGroupSummaryLine(d.watchlist, priceMap);
 
+  // Full heat block for the detailed breakdown
+  const heatBlock = buildSectorHeatBlock(d.watchlist, priceMap);
+
   // ── All tickers ranked by % change ───────────────────────────────────────
   const allRanked = d.watchlist
     .map((w) => {
