@@ -37,16 +37,27 @@ async function fetchPrevClose(ticker) {
   }
 }
 
-// Detect if a quote is stale (pre/post-market).
-// lastTimestamp is "2026-05-16T13:45:22Z" — compare to NYSE market hours in ET.
-function isMarketHours(lastTimestamp) {
-  if (!lastTimestamp) return false;
+// Detect market hours by checking actual NYSE schedule (9:30–16:00 ET).
+// ET = UTC-4 during EDT (Mar–Nov), UTC-5 during EST (Nov–Mar).
+function isNYSEMarketHours() {
   const now = new Date();
-  // NYSE: 09:30–16:00 ET. Use UTC offsets: ET = UTC-4 (EDT) or UTC-5 (EST)
-  // Simple check: if last trade was within the last 15 minutes, treat as live.
-  const lastTrade = new Date(lastTimestamp);
-  const msSinceTrade = now - lastTrade;
-  return msSinceTrade < 15 * 60 * 1000; // within 15 min = market hours active
+  // Determine ET offset: EDT is UTC-4, EST is UTC-5
+  // Simple approximation: EDT runs second Sunday of March through first Sunday of November
+  const jan = new Date(now.getFullYear(), 0, 1).getTimezoneOffset();
+  const jul = new Date(now.getFullYear(), 6, 1).getTimezoneOffset();
+  const isDST = now.getTimezoneOffset() < Math.max(jan, jul);
+  const etOffset = isDST ? -4 : -5; // hours from UTC
+
+  const etHours = now.getUTCHours() + etOffset + now.getUTCMinutes() / 60;
+  const dayOfWeek = now.getUTCDay(); // 0=Sun, 6=Sat — adjust for ET midnight crossings
+  // Adjust day if ET offset crosses midnight
+  const etDay = (dayOfWeek + (now.getUTCHours() + etOffset < 0 ? -1 : 0) + 7) % 7;
+
+  // Weekend: never market hours
+  if (etDay === 0 || etDay === 6) return false;
+
+  // Market hours: 9:30–16:00 ET
+  return etHours >= 9.5 && etHours < 16;
 }
 
 export default async function handler(req, res) {
@@ -92,7 +103,7 @@ export default async function handler(req, res) {
       if (q.outcome !== 'SUCCESS') continue;
       const hasPct   = q.oneDayChange?.percentChange != null;
       const hasPrev  = q.previousClose != null;
-      const isLive   = isMarketHours(q.lastTimestamp);
+      const isLive   = isNYSEMarketHours();
       const hasMid   = parseFloat(q.bid) > 0 && parseFloat(q.ask) > 0;
       // Need Yahoo prev close if: no Public pct AND (no prev close OR in pre-market with mid)
       if (!hasPct && (!hasPrev || (!isLive && hasMid))) {
@@ -121,7 +132,7 @@ export default async function handler(req, res) {
       const bid  = parseFloat(q.bid)  || null;
       const ask  = parseFloat(q.ask)  || null;
       const mid  = (bid && ask) ? (bid + ask) / 2 : null;
-      const isLive = isMarketHours(q.lastTimestamp);
+      const isLive = isNYSEMarketHours();
 
       // Price: during market hours use last trade; pre/post use midpoint if available
       const price = (!isLive && mid) ? mid : (Number.isFinite(last) ? last : mid);
