@@ -22,35 +22,39 @@ async function getAccessToken(secret) {
   return _cachedToken;
 }
 
-async function fetchPrevClose(ticker) {
+// Returns { prevClose, todayClose } from Yahoo Finance 5-day chart.
+// prevClose = the day before the most recent session (for session % change).
+// todayClose = the most recent completed session close (for ext hours % base).
+async function fetchCloses(ticker) {
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?range=5d&interval=1d`;
     const resp = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
     if (!resp.ok) return null;
     const json = await resp.json();
     const closes    = json?.chart?.result?.[0]?.indicators?.quote?.[0]?.close;
-    const timestamps = json?.chart?.result?.[0]?.timestamp; // Unix seconds
+    const timestamps = json?.chart?.result?.[0]?.timestamp;
     if (!closes || !timestamps) return null;
 
-    const marketOpen = isNYSEMarketHours();
-
-    // Build pairs of (timestamp, close), filter nulls
     const pairs = closes
       .map((c, i) => ({ close: c, ts: timestamps[i] }))
       .filter((p) => p.close != null);
 
     if (!pairs.length) return null;
 
+    const marketOpen = isNYSEMarketHours();
+
     if (marketOpen) {
-      // During market hours, the last bar may be today's partial session.
-      // Prev close = second-to-last completed bar.
-      return pairs.length >= 2
-        ? pairs[pairs.length - 2].close
-        : pairs[pairs.length - 1].close;
+      // During market hours: last bar is today's partial, second-to-last is prev close
+      const todayClose  = null; // market still open, no today close yet
+      const prevClose   = pairs.length >= 2 ? pairs[pairs.length - 2].close : pairs[pairs.length - 1].close;
+      return { prevClose, todayClose };
     } else {
-      // Pre/post market or weekend — the last bar IS the most recent close.
-      // On Monday pre-market this correctly returns Friday's close.
-      return pairs[pairs.length - 1].close;
+      // Extended hours / weekend:
+      // todayClose = most recent completed session (what session % is based on)
+      // prevClose  = the session before that (day before today's session)
+      const todayClose = pairs[pairs.length - 1].close;
+      const prevClose  = pairs.length >= 2 ? pairs[pairs.length - 2].close : null;
+      return { prevClose, todayClose };
     }
   } catch {
     return null;
@@ -114,30 +118,19 @@ export default async function handler(req, res) {
 
     const publicData = await publicResp.json();
     const quotes = publicData?.quotes || [];
+    const isLive = isNYSEMarketHours();
 
-    // Determine which tickers need prev close from Yahoo.
-    // We need it when Public doesn't return oneDayChange AND
-    // when we're in pre/post market (to compute midpoint vs prev close).
-    const needPrevClose = [];
-    for (const q of quotes) {
-      if (q.outcome !== 'SUCCESS') continue;
-      const hasPct   = q.oneDayChange?.percentChange != null;
-      const hasPrev  = q.previousClose != null;
-      const isLive   = isNYSEMarketHours();
-      const hasMid   = parseFloat(q.bid) > 0 && parseFloat(q.ask) > 0;
-      // Need Yahoo prev close if: no Public pct AND (no prev close OR in pre-market with mid)
-      if (!hasPct && (!hasPrev || (!isLive && hasMid))) {
-        needPrevClose.push(q.instrument?.symbol);
-      }
-    }
-
-    // Fetch prev closes in parallel, capped at 20 concurrent
-    const prevCloseMap = {};
-    for (let i = 0; i < needPrevClose.length; i += 20) {
-      const chunk = needPrevClose.slice(i, i + 20);
-      const results = await Promise.all(chunk.map(async (t) => [t, await fetchPrevClose(t)]));
-      for (const [ticker, close] of results) {
-        if (close != null) prevCloseMap[ticker] = close;
+    // Fetch Yahoo closes for ALL tickers — we need both prevClose and todayClose
+    // to compute session % AND extended hours % correctly.
+    // Run all in parallel, capped at 20 concurrent.
+    const closesMap = {}; // symbol → { prevClose, todayClose }
+    for (let i = 0; i < tickerList.length; i += 20) {
+      const chunk = tickerList.slice(i, i + 20);
+      const results = await Promise.all(
+        chunk.map(async (t) => [t, await fetchCloses(t)])
+      );
+      for (const [ticker, closes] of results) {
+        if (closes) closesMap[ticker] = closes;
       }
     }
 
@@ -152,41 +145,49 @@ export default async function handler(req, res) {
       const bid  = parseFloat(q.bid)  || null;
       const ask  = parseFloat(q.ask)  || null;
       const mid  = (bid && ask) ? (bid + ask) / 2 : null;
-      const isLive = isNYSEMarketHours();
 
       if (!Number.isFinite(last) && !mid) continue;
 
-      const prevClose = q.previousClose
+      const yahooCloses = closesMap[symbol] || {};
+      // todayClose = most recent session close (ext hours base)
+      // prevClose  = session before that (session % base)
+      const todayClose = yahooCloses.todayClose ?? null;
+      const prevClose  = q.previousClose
         ? parseFloat(q.previousClose)
-        : prevCloseMap[symbol] ?? null;
+        : yahooCloses.prevClose ?? null;
 
-      // ── Regular session change (close vs prev close) ──────────────────────
-      // This is what happened 9:30–4pm — the "today" number on Public.
+      // ── Session change: today's close vs previous day's close ─────────────
+      // Public's oneDayChange is most accurate when available.
+      // Otherwise: (last - prevClose) / prevClose
       let sessionChangePct = null;
       if (q.oneDayChange?.percentChange != null) {
         sessionChangePct = parseFloat(q.oneDayChange.percentChange);
       } else if (Number.isFinite(last) && prevClose && prevClose > 0) {
         sessionChangePct = ((last - prevClose) / prevClose) * 100;
+      } else if (todayClose && prevClose && prevClose > 0) {
+        // Use Yahoo's own close values if Public's last is unreliable
+        sessionChangePct = ((todayClose - prevClose) / prevClose) * 100;
       }
 
-      // ── Extended hours change (mark vs close) ─────────────────────────────
-      // Pre/post market: (mid - last) / last — what's happening right now vs close.
-      // Null during regular market hours (no extended move to show yet).
+      // ── Extended hours change: current mid vs today's close ───────────────
+      // (mid - todayClose) / todayClose — what's moving NOW vs where it ended
       let extendedChangePct = null;
-      if (!isLive && mid && Number.isFinite(last) && last > 0) {
-        extendedChangePct = ((mid - last) / last) * 100;
+      if (!isLive && mid) {
+        const base = todayClose ?? (Number.isFinite(last) ? last : null);
+        if (base && base > 0) {
+          extendedChangePct = ((mid - base) / base) * 100;
+        }
       }
 
       // ── Display price ─────────────────────────────────────────────────────
-      // Market hours: last trade. Extended: midpoint (current best estimate).
       const displayPrice = (!isLive && mid) ? mid : (Number.isFinite(last) ? last : mid);
       if (!displayPrice) continue;
 
       result[symbol] = {
         price:             parseFloat(displayPrice.toFixed(4)),
-        closePrice:        Number.isFinite(last) ? parseFloat(last.toFixed(4)) : null,
-        prevClose:         prevClose ? parseFloat(prevClose.toFixed(4)) : null,
-        sessionChangePct:  sessionChangePct != null ? parseFloat(sessionChangePct.toFixed(2)) : null,
+        closePrice:        todayClose ? parseFloat(todayClose.toFixed(4)) : (Number.isFinite(last) ? parseFloat(last.toFixed(4)) : null),
+        prevClose:         prevClose  ? parseFloat(prevClose.toFixed(4))  : null,
+        sessionChangePct:  sessionChangePct  != null ? parseFloat(sessionChangePct.toFixed(2))  : null,
         extendedChangePct: extendedChangePct != null ? parseFloat(extendedChangePct.toFixed(2)) : null,
         isExtendedHours:   !isLive,
         bid,

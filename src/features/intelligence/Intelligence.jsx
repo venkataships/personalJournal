@@ -252,18 +252,20 @@ function buildSectorHeatBlock(watchlist, priceMap) {
 
   const priceLine = (ticker) => {
     const q = priceMap?.get(ticker.toUpperCase());
-    if (!q || q.price == null) return `${ticker} (no price)`;
+    if (!q || q.price == null) return null;
 
     const priceStr = `$${q.price.toFixed(2)}`;
 
-    if (q.isExtendedHours && q.extendedChangePct != null && q.sessionChangePct != null) {
-      // Show both: session change AND extended hours change — same as Public
-      const sSign = q.sessionChangePct >= 0 ? '+' : '';
-      const eSign = q.extendedChangePct >= 0 ? '+' : '';
-      return `${ticker} ${priceStr} (${sSign}${q.sessionChangePct.toFixed(2)}% close, ${eSign}${q.extendedChangePct.toFixed(2)}% ext)`;
+    if (q.isExtendedHours) {
+      const sStr = q.sessionChangePct != null
+        ? `${q.sessionChangePct >= 0 ? '+' : ''}${q.sessionChangePct.toFixed(2)}% cls`
+        : 'cls N/A';
+      const eStr = q.extendedChangePct != null
+        ? `${q.extendedChangePct >= 0 ? '+' : ''}${q.extendedChangePct.toFixed(2)}% ext`
+        : '';
+      return `${ticker} ${priceStr} (${sStr}${eStr ? ' · ' + eStr : ''})`;
     }
 
-    // Market hours — just the session change
     const pct = q.sessionChangePct != null
       ? `${q.sessionChangePct >= 0 ? '+' : ''}${q.sessionChangePct.toFixed(2)}%`
       : 'chg N/A';
@@ -285,9 +287,10 @@ function buildSectorHeatBlock(watchlist, priceMap) {
   });
 
   // Macro pinned first, rest sorted hottest → coldest (nulls last)
-  const macro = rows.find((r) => r.cat.toLowerCase() === 'macro');
+  // Skip thin groups (under 3 tickers) — not enough signal
+  const macro = rows.find((r) => r.cat.toLowerCase() === 'macro' && r.count >= 2);
   const others = rows
-    .filter((r) => r.cat.toLowerCase() !== 'macro')
+    .filter((r) => r.cat.toLowerCase() !== 'macro' && r.count >= 3)
     .sort((a, b) => {
       if (a.avg == null && b.avg == null) return 0;
       if (a.avg == null) return 1;
@@ -295,11 +298,20 @@ function buildSectorHeatBlock(watchlist, priceMap) {
       return b.avg - a.avg;
     });
 
-  const ordered = macro ? [macro, ...others] : others;
+  // Top 5 and bottom 5 — skip the middle
+  const top5    = others.slice(0, 5);
+  const bottom5 = others.slice(-5).filter((r) => !top5.includes(r));
+  const selected = [...top5, ...bottom5];
+
+  // Check if any ticker in the data is in extended hours
+  const anyExtended = [...(priceMap?.values() ?? [])].some((q) => q.isExtendedHours);
+  const extLabel = anyExtended ? ' [ext-hrs]' : '';
+
+  const ordered = macro ? [macro, ...selected] : selected;
 
   return ordered
     .map(({ cat, avgStr, tickerLines, count }) =>
-      `${cat.toUpperCase()} (${count} tickers, avg ${avgStr})\n  ${tickerLines}`)
+      `${cat.toUpperCase()} (${count} tickers, avg ${avgStr}${extLabel})\n  ${tickerLines || '(no price data)'}`)
     .join('\n\n');
 }
 
