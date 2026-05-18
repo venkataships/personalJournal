@@ -85,6 +85,37 @@ async function fetchPositionTickers() {
   return new Set((data || []).map((r) => r.ticker.toUpperCase()));
 }
 
+// Fetch live prices via /api/quotes serverless function.
+// Returns Map<ticker, { price, sessionChangePct, extendedChangePct, isExtendedHours }>
+// Same logic as Intelligence briefs — both session and extended hours change.
+async function fetchPrices(tickers) {
+  if (!tickers.length) return new Map();
+  const unique = [...new Set(tickers.map((t) => t.toUpperCase()))];
+  // Batch in chunks of 50 to stay within URL length limits
+  const CHUNK = 50;
+  const map = new Map();
+  for (let i = 0; i < unique.length; i += CHUNK) {
+    const symbols = unique.slice(i, i + CHUNK).join(',');
+    try {
+      const res = await fetch(`/api/quotes?symbols=${symbols}`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      for (const [sym, q] of Object.entries(data)) {
+        if (!q || q.price == null) continue;
+        map.set(sym.toUpperCase(), {
+          price:             q.price,
+          sessionChangePct:  q.sessionChangePct  ?? null,
+          extendedChangePct: q.extendedChangePct ?? null,
+          isExtendedHours:   q.isExtendedHours   ?? false,
+        });
+      }
+    } catch { /* non-fatal — prices degrade gracefully */ }
+  }
+  return map;
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -96,7 +127,9 @@ export default function Watchlist() {
   const [positionTickers, setPositionTickers] = useState(new Set());
   const [activeCategory, setActiveCategory] = useState(null);
   const [modal, setModal] = useState(null);
-  const [search, setSearch] = useState(''); // null | { mode: 'add' | 'edit', row?: {} }
+  const [search, setSearch] = useState('');
+  const [priceMap, setPriceMap] = useState(new Map());
+  const [pricesLoading, setPricesLoading] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -116,6 +149,20 @@ export default function Watchlist() {
     return () => { cancelled = true; };
   }, [load]);
 
+  // Fetch live prices once items are loaded — fires whenever items change
+  useEffect(() => {
+    if (!items.length) return;
+    let cancelled = false;
+    setPricesLoading(true);
+    const tickers = items.map((r) => r.ticker);
+    fetchPrices(tickers).then((map) => {
+      if (!cancelled) setPriceMap(map);
+    }).finally(() => {
+      if (!cancelled) setPricesLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [items]);
+
   // Build groups: real category groups + synthetic 'daily' from in_daily_focus.
   // Same row object appears in both — no copies, no duplication.
   const groups = useMemo(() => {
@@ -129,6 +176,23 @@ export default function Watchlist() {
     if (daily.length > 0) g['daily'] = daily;
     return g;
   }, [items]);
+
+  // Compute avg % change per group — uses extended if available, else session
+  const groupAvg = useMemo(() => {
+    const result = {};
+    for (const [cat, tickers] of Object.entries(groups)) {
+      const changes = tickers
+        .map((r) => {
+          const q = priceMap.get(r.ticker.toUpperCase());
+          return q?.extendedChangePct ?? q?.sessionChangePct ?? null;
+        })
+        .filter((c) => c != null && Number.isFinite(c));
+      result[cat] = changes.length
+        ? changes.reduce((s, c) => s + c, 0) / changes.length
+        : null;
+    }
+    return result;
+  }, [groups, priceMap]);
 
   // daily pinned first, rest alphabetical
   const categories = useMemo(() => {
@@ -276,6 +340,7 @@ export default function Watchlist() {
                         row={row}
                         inPositions={positionTickers.has(row.ticker.toUpperCase())}
                         showCategory
+                        quote={priceMap.get(row.ticker.toUpperCase()) || null}
                         onEdit={() => openEdit(row)}
                         onDelete={() => onSoftDelete(row)}
                       />
@@ -293,32 +358,53 @@ export default function Watchlist() {
                       onChange={(e) => setActiveCategory(e.target.value)}
                       className="w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2.5 text-[13px] font-medium uppercase tracking-[0.12em] text-emerald-300 focus:border-emerald-500/60 focus:outline-none"
                     >
-                      {categories.map((cat) => (
-                        <option key={cat} value={cat}>
-                          {cat} ({countFor(cat)})
-                        </option>
-                      ))}
+                      {categories.map((cat) => {
+                        const avg = groupAvg[cat];
+                        const avgStr = avg != null
+                          ? ` ${avg >= 0 ? '+' : ''}${avg.toFixed(2)}%`
+                          : '';
+                        return (
+                          <option key={cat} value={cat}>
+                            {cat} ({countFor(cat)}){avgStr}
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
                   {/* Desktop: scrollable tabs */}
                   <div className="hidden sm:flex items-end gap-1 overflow-x-auto pb-2" style={{ scrollbarWidth: 'thin', scrollbarColor: '#404040 transparent' }}>
-                    {categories.map((cat) => (
-                      <button
-                        key={cat}
-                        type="button"
-                        onClick={() => setActiveCategory(cat)}
-                        className={`shrink-0 rounded-t-md border-t border-l border-r px-4 py-2 text-[12px] font-medium uppercase tracking-[0.15em] transition-colors ${
-                          activeCategory === cat
-                            ? 'border-neutral-700 bg-neutral-900 text-emerald-300'
-                            : 'border-neutral-800/60 bg-neutral-950/40 text-neutral-500 hover:text-neutral-300'
-                        }`}
-                      >
-                        {cat}
-                        <span className={`ml-2 font-mono text-[10px] ${activeCategory === cat ? 'text-emerald-400/70' : 'text-neutral-700'}`}>
-                          {countFor(cat)}
-                        </span>
-                      </button>
-                    ))}
+                    {categories.map((cat) => {
+                      const avg = groupAvg[cat];
+                      const avgStr = avg != null
+                        ? (avg >= 0 ? '+' : '') + avg.toFixed(2) + '%'
+                        : pricesLoading ? '…' : null;
+                      const avgColor = avg == null ? 'text-neutral-600'
+                        : avg > 0 ? 'text-emerald-400'
+                        : avg < 0 ? 'text-red-400'
+                        : 'text-neutral-500';
+                      return (
+                        <button
+                          key={cat}
+                          type="button"
+                          onClick={() => setActiveCategory(cat)}
+                          className={`shrink-0 rounded-t-md border-t border-l border-r px-4 py-2 text-[12px] font-medium uppercase tracking-[0.15em] transition-colors ${
+                            activeCategory === cat
+                              ? 'border-neutral-700 bg-neutral-900 text-emerald-300'
+                              : 'border-neutral-800/60 bg-neutral-950/40 text-neutral-500 hover:text-neutral-300'
+                          }`}
+                        >
+                          {cat}
+                          <span className={`ml-1.5 font-mono text-[10px] ${activeCategory === cat ? 'text-emerald-400/70' : 'text-neutral-700'}`}>
+                            {countFor(cat)}
+                          </span>
+                          {avgStr && (
+                            <span className={`ml-1.5 font-mono text-[10px] ${avgColor}`}>
+                              {avgStr}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -336,6 +422,7 @@ export default function Watchlist() {
                         row={row}
                         inPositions={positionTickers.has(row.ticker.toUpperCase())}
                         showCategory={activeCategory === 'daily'}
+                        quote={priceMap.get(row.ticker.toUpperCase()) || null}
                         onEdit={() => openEdit(row)}
                         onDelete={() => onSoftDelete(row)}
                       />
@@ -376,30 +463,72 @@ function TickerTableHeader({ showCategory }) {
   return (
     <div className={`hidden sm:grid items-center gap-4 px-5 py-2.5 border-b border-neutral-800 text-[10px] font-medium uppercase tracking-[0.18em] text-neutral-500 ${
       showCategory
-        ? 'grid-cols-[1fr_0.5fr_2fr_1fr_1fr_1.2fr_auto]'
-        : 'grid-cols-[1fr_2.5fr_1fr_1fr_1.2fr_auto]'
+        ? 'grid-cols-[1fr_0.5fr_1.2fr_2fr_1fr_1fr_auto]'
+        : 'grid-cols-[1fr_1.2fr_2fr_1fr_1fr_auto]'
     }`}>
       <div>Ticker</div>
       {showCategory && <div>Group</div>}
+      <div className="text-right">Price</div>
       <div>Thesis</div>
       <div>Stage</div>
       <div>Timeframe</div>
-      <div>Source</div>
       <div className="w-[72px]"></div>
     </div>
   );
 }
 
-function TickerRow({ row, inPositions, showCategory, onEdit, onDelete }) {
+function TickerRow({ row, inPositions, showCategory, quote, onEdit, onDelete }) {
   const [expanded, setExpanded] = useState(false);
   const longThesis = row.thesis && row.thesis.length > 80;
+
+  // Format price display — same dual-% logic as Intelligence
+  const priceDisplay = (() => {
+    if (!quote || quote.price == null) return null;
+    const priceStr = `$${quote.price.toFixed(2)}`;
+    if (quote.isExtendedHours) {
+      const sStr = quote.sessionChangePct != null
+        ? `${quote.sessionChangePct >= 0 ? '+' : ''}${quote.sessionChangePct.toFixed(2)}%`
+        : null;
+      const eStr = quote.extendedChangePct != null
+        ? `${quote.extendedChangePct >= 0 ? '+' : ''}${quote.extendedChangePct.toFixed(2)}%`
+        : null;
+      const ePctColor = quote.extendedChangePct == null ? 'text-neutral-500'
+        : quote.extendedChangePct > 0 ? 'text-emerald-400'
+        : quote.extendedChangePct < 0 ? 'text-red-400'
+        : 'text-neutral-400';
+      const sPctColor = quote.sessionChangePct == null ? 'text-neutral-500'
+        : quote.sessionChangePct > 0 ? 'text-emerald-400'
+        : quote.sessionChangePct < 0 ? 'text-red-400'
+        : 'text-neutral-400';
+      return (
+        <div className="text-right">
+          <div className="font-mono text-[13px] text-neutral-100">{priceStr}</div>
+          {sStr && <div className={`font-mono text-[11px] ${sPctColor}`}>{sStr} cls</div>}
+          {eStr && <div className={`font-mono text-[11px] ${ePctColor}`}>{eStr} ext</div>}
+        </div>
+      );
+    }
+    // Market hours — just session change
+    const pct = quote.sessionChangePct;
+    const pctColor = pct == null ? 'text-neutral-500'
+      : pct > 0 ? 'text-emerald-400'
+      : pct < 0 ? 'text-red-400'
+      : 'text-neutral-400';
+    const pctStr = pct != null ? `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%` : null;
+    return (
+      <div className="text-right">
+        <div className="font-mono text-[13px] text-neutral-100">{priceStr}</div>
+        {pctStr && <div className={`font-mono text-[11px] ${pctColor}`}>{pctStr}</div>}
+      </div>
+    );
+  })();
 
   return (
     <div className="border-b border-neutral-900 last:border-b-0">
       <div className={`grid items-start gap-4 px-5 py-3.5 text-[13px] grid-cols-2 ${
         showCategory
-          ? 'sm:grid-cols-[1fr_0.5fr_2fr_1fr_1fr_1.2fr_auto]'
-          : 'sm:grid-cols-[1fr_2.5fr_1fr_1fr_1.2fr_auto]'
+          ? 'sm:grid-cols-[1fr_0.5fr_1.2fr_2fr_1fr_1fr_auto]'
+          : 'sm:grid-cols-[1fr_1.2fr_2fr_1fr_1fr_auto]'
       }`}>
         {/* Ticker + sentiment */}
         <div className="flex items-center gap-2 col-span-2 sm:col-span-1">
@@ -425,6 +554,11 @@ function TickerRow({ row, inPositions, showCategory, onEdit, onDelete }) {
             </span>
           </div>
         )}
+
+        {/* Live price + % change */}
+        <div className="hidden sm:block">
+          {priceDisplay ?? <span className="text-neutral-700 text-[12px] font-mono">—</span>}
+        </div>
 
         {/* Thesis — truncated, expandable */}
         <div className="col-span-2 sm:col-span-1">
