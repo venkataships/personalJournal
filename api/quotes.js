@@ -28,10 +28,30 @@ async function fetchPrevClose(ticker) {
     const resp = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
     if (!resp.ok) return null;
     const json = await resp.json();
-    const closes = json?.chart?.result?.[0]?.indicators?.quote?.[0]?.close;
-    if (!closes) return null;
-    const valid = closes.filter((c) => c != null);
-    return valid.length >= 2 ? valid[valid.length - 2] : valid[valid.length - 1] ?? null;
+    const closes    = json?.chart?.result?.[0]?.indicators?.quote?.[0]?.close;
+    const timestamps = json?.chart?.result?.[0]?.timestamp; // Unix seconds
+    if (!closes || !timestamps) return null;
+
+    const marketOpen = isNYSEMarketHours();
+
+    // Build pairs of (timestamp, close), filter nulls
+    const pairs = closes
+      .map((c, i) => ({ close: c, ts: timestamps[i] }))
+      .filter((p) => p.close != null);
+
+    if (!pairs.length) return null;
+
+    if (marketOpen) {
+      // During market hours, the last bar may be today's partial session.
+      // Prev close = second-to-last completed bar.
+      return pairs.length >= 2
+        ? pairs[pairs.length - 2].close
+        : pairs[pairs.length - 1].close;
+    } else {
+      // Pre/post market or weekend — the last bar IS the most recent close.
+      // On Monday pre-market this correctly returns Friday's close.
+      return pairs[pairs.length - 1].close;
+    }
   } catch {
     return null;
   }
