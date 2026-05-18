@@ -80,17 +80,13 @@ async function fetchAll() {
 
 // ---------------------------------------------------------------------------
 // Live price fetching — Yahoo Finance batch quote (unofficial but stable)
-// One request for all tickers. Returns Map<ticker, { price, changePct }>
-// Falls back gracefully: missing tickers simply won't appear in the map.
-// ---------------------------------------------------------------------------
+// One request for all tickers via /api/quotes serverless function.
+// Returns Map<ticker, { price, sessionChangePct, extendedChangePct, isExtendedHours, ... }>
 
 async function fetchPrices(tickers) {
   if (!tickers.length) return new Map();
   const unique = [...new Set(tickers.map((t) => t.toUpperCase()))];
   const symbols = unique.join(',');
-
-  // Calls /api/quotes (Vercel serverless function).
-  // Returns { AAPL: { price, changePct, bid, ask, volume, timestamp }, ... }
   const url = `/api/quotes?symbols=${symbols}`;
 
   try {
@@ -104,9 +100,15 @@ async function fetchPrices(tickers) {
     for (const [sym, q] of Object.entries(data)) {
       if (!q || q.price == null) continue;
       map.set(sym.toUpperCase(), {
-        price:     q.price,
-        changePct: q.changePct,
-        name:      sym,
+        price:             q.price,
+        closePrice:        q.closePrice        ?? null,
+        prevClose:         q.prevClose         ?? null,
+        sessionChangePct:  q.sessionChangePct  ?? null,
+        extendedChangePct: q.extendedChangePct ?? null,
+        isExtendedHours:   q.isExtendedHours   ?? false,
+        bid:               q.bid               ?? null,
+        ask:               q.ask               ?? null,
+        mid:               q.mid               ?? null,
       });
     }
     return map;
@@ -251,15 +253,26 @@ function buildSectorHeatBlock(watchlist, priceMap) {
   const priceLine = (ticker) => {
     const q = priceMap?.get(ticker.toUpperCase());
     if (!q || q.price == null) return `${ticker} (no price)`;
-    const sign = (q.changePct ?? 0) >= 0 ? '+' : '';
-    const pct  = q.changePct != null ? `${sign}${q.changePct.toFixed(2)}%` : 'chg N/A';
-    const tag  = q.isPreMarket ? ' [pre-mkt mid]' : '';
-    return `${ticker} $${q.price.toFixed(2)} (${pct})${tag}`;
+
+    const priceStr = `$${q.price.toFixed(2)}`;
+
+    if (q.isExtendedHours && q.extendedChangePct != null && q.sessionChangePct != null) {
+      // Show both: session change AND extended hours change — same as Public
+      const sSign = q.sessionChangePct >= 0 ? '+' : '';
+      const eSign = q.extendedChangePct >= 0 ? '+' : '';
+      return `${ticker} ${priceStr} (${sSign}${q.sessionChangePct.toFixed(2)}% close, ${eSign}${q.extendedChangePct.toFixed(2)}% ext)`;
+    }
+
+    // Market hours — just the session change
+    const pct = q.sessionChangePct != null
+      ? `${q.sessionChangePct >= 0 ? '+' : ''}${q.sessionChangePct.toFixed(2)}%`
+      : 'chg N/A';
+    return `${ticker} ${priceStr} (${pct})`;
   };
 
   const rows = Object.entries(byCategory).map(([cat, tickers]) => {
     const changes = tickers
-      .map((t) => priceMap?.get(t.toUpperCase())?.changePct)
+      .map((t) => (q => (q?.extendedChangePct ?? q?.sessionChangePct))(priceMap?.get(t.toUpperCase())))
       .filter((c) => c != null && Number.isFinite(c));
     const avg = changes.length
       ? changes.reduce((s, c) => s + c, 0) / changes.length
@@ -304,7 +317,7 @@ function buildGroupSummaryLine(watchlist, priceMap) {
 
   const rows = Object.entries(byCategory).map(([cat, tickers]) => {
     const changes = tickers
-      .map((t) => priceMap?.get(t.toUpperCase())?.changePct)
+      .map((t) => (q => (q?.extendedChangePct ?? q?.sessionChangePct))(priceMap?.get(t.toUpperCase())))
       .filter((c) => c != null && Number.isFinite(c));
     const avg = changes.length
       ? changes.reduce((s, c) => s + c, 0) / changes.length
@@ -391,18 +404,24 @@ function buildPulsePrompt(d, priceMap) {
   // Full heat block for the detailed breakdown
   const heatBlock = buildSectorHeatBlock(d.watchlist, priceMap);
 
-  // ── All tickers ranked by % change ───────────────────────────────────────
+  // All tickers ranked — use extended change when available, else session change
   const allRanked = d.watchlist
     .map((w) => {
       const q = priceMap.get(w.ticker.toUpperCase());
+      if (!q || q.price == null) return null;
+      // Rank by the most current change: extended if available, else session
+      const changePct = q.extendedChangePct ?? q.sessionChangePct ?? null;
       return {
         ticker: w.ticker,
         cat: w.category || 'Uncategorized',
-        changePct: q?.changePct ?? null,
-        price: q?.price ?? null,
+        changePct,
+        sessionChangePct: q.sessionChangePct,
+        extendedChangePct: q.extendedChangePct,
+        isExtendedHours: q.isExtendedHours,
+        price: q.price,
       };
     })
-    .filter((x) => x.changePct != null && Number.isFinite(x.changePct))
+    .filter((x) => x && x.changePct != null && Number.isFinite(x.changePct))
     .sort((a, b) => b.changePct - a.changePct);
 
   const top5    = allRanked.slice(0, 5);
@@ -410,6 +429,11 @@ function buildPulsePrompt(d, priceMap) {
 
   const rankLine = (x) => {
     const sign = x.changePct >= 0 ? '+' : '';
+    if (x.isExtendedHours && x.extendedChangePct != null && x.sessionChangePct != null) {
+      const sSign = x.sessionChangePct >= 0 ? '+' : '';
+      const eSign = x.extendedChangePct >= 0 ? '+' : '';
+      return `${x.ticker} $${x.price.toFixed(2)} (${sSign}${x.sessionChangePct.toFixed(2)}% close · ${eSign}${x.extendedChangePct.toFixed(2)}% ext) [${x.cat}]`;
+    }
     return `${x.ticker} $${x.price.toFixed(2)} (${sign}${x.changePct.toFixed(2)}%) [${x.cat}]`;
   };
 

@@ -148,51 +148,52 @@ export default async function handler(req, res) {
       const symbol = q.instrument?.symbol;
       if (!symbol) continue;
 
-      const last = parseFloat(q.last);
+      const last = parseFloat(q.last);   // last regular-session trade price
       const bid  = parseFloat(q.bid)  || null;
       const ask  = parseFloat(q.ask)  || null;
       const mid  = (bid && ask) ? (bid + ask) / 2 : null;
       const isLive = isNYSEMarketHours();
 
-      // Price: during market hours use last trade; pre/post use midpoint if available
-      const price = (!isLive && mid) ? mid : (Number.isFinite(last) ? last : mid);
-      if (!price) continue;
+      if (!Number.isFinite(last) && !mid) continue;
 
-      // changePct resolution order:
-      // 1. Public's own oneDayChange.percentChange (most accurate when available)
-      // 2. Compute from Public's previousClose
-      // 3. Compute from Yahoo prev close
-      // Pre-market: always use midpoint vs prev close (last trade is yesterday)
-      let changePct = null;
+      const prevClose = q.previousClose
+        ? parseFloat(q.previousClose)
+        : prevCloseMap[symbol] ?? null;
 
-      if (!isLive && mid) {
-        // Pre/post market — compute from midpoint vs prev close
-        const prev = q.previousClose
-          ? parseFloat(q.previousClose)
-          : prevCloseMap[symbol];
-        if (prev && prev > 0) {
-          changePct = ((mid - prev) / prev) * 100;
-        }
-      } else if (q.oneDayChange?.percentChange != null) {
-        changePct = parseFloat(q.oneDayChange.percentChange);
-      } else {
-        const prev = q.previousClose
-          ? parseFloat(q.previousClose)
-          : prevCloseMap[symbol];
-        if (prev && prev > 0) {
-          changePct = ((price - prev) / prev) * 100;
-        }
+      // ── Regular session change (close vs prev close) ──────────────────────
+      // This is what happened 9:30–4pm — the "today" number on Public.
+      let sessionChangePct = null;
+      if (q.oneDayChange?.percentChange != null) {
+        sessionChangePct = parseFloat(q.oneDayChange.percentChange);
+      } else if (Number.isFinite(last) && prevClose && prevClose > 0) {
+        sessionChangePct = ((last - prevClose) / prevClose) * 100;
       }
 
+      // ── Extended hours change (mark vs close) ─────────────────────────────
+      // Pre/post market: (mid - last) / last — what's happening right now vs close.
+      // Null during regular market hours (no extended move to show yet).
+      let extendedChangePct = null;
+      if (!isLive && mid && Number.isFinite(last) && last > 0) {
+        extendedChangePct = ((mid - last) / last) * 100;
+      }
+
+      // ── Display price ─────────────────────────────────────────────────────
+      // Market hours: last trade. Extended: midpoint (current best estimate).
+      const displayPrice = (!isLive && mid) ? mid : (Number.isFinite(last) ? last : mid);
+      if (!displayPrice) continue;
+
       result[symbol] = {
-        price:     parseFloat(price.toFixed(4)),
-        changePct: changePct != null ? parseFloat(changePct.toFixed(2)) : null,
+        price:             parseFloat(displayPrice.toFixed(4)),
+        closePrice:        Number.isFinite(last) ? parseFloat(last.toFixed(4)) : null,
+        prevClose:         prevClose ? parseFloat(prevClose.toFixed(4)) : null,
+        sessionChangePct:  sessionChangePct != null ? parseFloat(sessionChangePct.toFixed(2)) : null,
+        extendedChangePct: extendedChangePct != null ? parseFloat(extendedChangePct.toFixed(2)) : null,
+        isExtendedHours:   !isLive,
         bid,
         ask,
-        mid:       mid ? parseFloat(mid.toFixed(4)) : null,
-        isPreMarket: !isLive && mid != null,
-        volume:    q.volume    || null,
-        timestamp: q.lastTimestamp || null,
+        mid:               mid ? parseFloat(mid.toFixed(4)) : null,
+        volume:            q.volume || null,
+        timestamp:         q.lastTimestamp || null,
       };
     }
 
