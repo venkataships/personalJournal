@@ -8,6 +8,8 @@ import {
   Activity,
   RefreshCw,
   Square,
+  Settings,
+  Check,
 } from 'lucide-react';
 import { supabase, authReady } from '../../lib/supabase';
 import { anthropic, CLAUDE_MODEL } from '../../lib/claude';
@@ -358,46 +360,95 @@ function buildGroupSummaryLine(watchlist, priceMap) {
     .join(' | ');
 }
 
-function buildSectorPrompt(d, priceMap) {
-  const hasPrices = priceMap && priceMap.size > 0;
-  const heatBlock = buildSectorHeatBlock(d.watchlist, priceMap);
+function buildSectorPrompt(d, priceMap, selectedGroups) {
   const today = new Date().toLocaleDateString('en-US', {
     weekday: 'long', month: 'short', day: 'numeric',
   });
 
-  return `Sector analysis for ${today} based on this trader's watchlist groups.
-${hasPrices ? 'Live prices included — use % changes to identify what is actually moving today.' : 'No live prices — analyse by watchlist composition and catalyst coverage only.'}
+  // Filter watchlist to selected groups only
+  const focused = selectedGroups.length > 0
+    ? d.watchlist.filter((w) => selectedGroups.includes(w.category || 'Uncategorized'))
+    : d.watchlist;
 
-WATCHLIST GROUP BREAKDOWN (Macro first, then hottest → coldest):
-${heatBlock}
+  // Build group blocks for selected groups only
+  const byCategory = {};
+  for (const w of focused) {
+    const cat = w.category || 'Uncategorized';
+    if (!byCategory[cat]) byCategory[cat] = [];
+    byCategory[cat].push(w);
+  }
 
-ACTIVE CATALYSTS:
+  const groupBlocks = Object.entries(byCategory).map(([cat, items]) => {
+    const tickers = items.map((w) => {
+      const q = priceMap?.get(w.ticker.toUpperCase());
+      if (!q || q.price == null) return `${w.ticker} (no price)`;
+      const priceStr = `$${q.price.toFixed(2)}`;
+      if (q.isExtendedHours) {
+        const s = q.sessionChangePct != null ? `${q.sessionChangePct >= 0 ? '+' : ''}${q.sessionChangePct.toFixed(2)}% cls` : '';
+        const e = q.extendedChangePct != null ? `${q.extendedChangePct >= 0 ? '+' : ''}${q.extendedChangePct.toFixed(2)}% ext` : '';
+        return `${w.ticker} ${priceStr} (${[s, e].filter(Boolean).join(' · ')})`;
+      }
+      const pct = q.sessionChangePct != null ? `${q.sessionChangePct >= 0 ? '+' : ''}${q.sessionChangePct.toFixed(2)}%` : '';
+      return `${w.ticker} ${priceStr} (${pct})`;
+    }).join(', ');
+
+    const changes = items
+      .map((w) => {
+        const q = priceMap?.get(w.ticker.toUpperCase());
+        return q?.extendedChangePct ?? q?.sessionChangePct ?? null;
+      })
+      .filter((c) => c != null && Number.isFinite(c));
+    const avg = changes.length ? changes.reduce((s, c) => s + c, 0) / changes.length : null;
+    const avgStr = avg != null ? `avg ${avg >= 0 ? '+' : ''}${avg.toFixed(2)}%` : 'no price data';
+
+    return `${cat.toUpperCase()} (${items.length} tickers, ${avgStr})\n  ${tickers}`;
+  }).join('\n\n');
+
+  // Also include macro group for context even if not selected
+  const macroItems = d.watchlist.filter((w) => (w.category || '').toLowerCase() === 'macro');
+  const macroBlock = macroItems.length > 0 ? (() => {
+    const tickers = macroItems.map((w) => {
+      const q = priceMap?.get(w.ticker.toUpperCase());
+      if (!q || q.price == null) return w.ticker;
+      const pct = q.extendedChangePct ?? q.sessionChangePct;
+      return pct != null ? `${w.ticker} ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%` : w.ticker;
+    }).join(', ');
+    return `MACRO: ${tickers}`;
+  })() : '';
+
+  return `Sector-focused analysis for ${today}.
+
+MACRO CONTEXT (always include regardless of focus):
+${macroBlock || 'No macro tickers in watchlist.'}
+
+MY FOCUSED GROUPS (with live prices):
+${groupBlocks || 'No data for selected groups.'}
+
+ACTIVE CATALYSTS (for context):
 ${fmtCatalysts(d.catalysts)}
 
-CURRENT POSITIONS:
-${fmtPositions(d.positions)}
+You are a sector analyst with access to real-time market knowledge up to your training cutoff.
+For each of my focused groups above:
+1. Use the live prices I provided to assess today's price action
+2. Apply YOUR OWN knowledge: what is happening in this sector today? Recent news, macro tailwinds/headwinds, earnings, regulatory moves, institutional flows — anything relevant you know about
+3. Tell me if my watchlist price action CONFIRMS or CONTRADICTS the broader sector narrative you know about
 
-Produce exactly this format — tight, specific, no filler:
+Produce exactly this format:
 
 📊 SECTOR ANALYSIS — ${today}
 
-🌐 MACRO FIRST
-[What is the macro group telling you today? Name the tickers and their moves if prices available.
-Is it risk-on (QQQ/IWM leading) or risk-off (IEF/GLD leading)? One short paragraph.]
+🌐 MACRO READ
+[Risk-on or risk-off today based on the macro tickers? One sentence.]
 
-🔥 GROUP HEAT
-[Each group in order, one line each: GROUP avg +X.X% — which tickers lead/lag, one sentence on what it means.
-Skip groups with no price data or fewer than 3 tickers.
-Bold the hottest and coldest groups.]
+${Object.keys(byCategory).map(cat => `🔍 ${cat.toUpperCase()}
+[Price action: what my tickers show today]
+[Your context: what you know about this sector/news/macro right now — be specific, name catalysts, earnings, regulatory events, macro drivers]
+[Signal: bullish / bearish / neutral — and why]`).join('\n\n')}
 
-💼 WHERE YOU'RE POSITIONED VS WHERE MOMENTUM IS
-[Which of your held positions are in the hottest groups today?
-Which groups have momentum but you're underweight or not in?
-Keep it to 3-4 specific observations.]
-
-⚡ ONE TRADE IDEA
-[The single most actionable setup based on group momentum + your watchlist. Specific ticker, current price, why today.]`;
+⚡ HIGHEST CONVICTION CALL
+[Based on price action + your sector knowledge, the single best setup right now. Ticker, price, why today specifically.]`;
 }
+
 
 function buildPulsePrompt(d, priceMap) {
   const today = new Date().toLocaleDateString('en-US', {
@@ -436,21 +487,21 @@ function buildPulsePrompt(d, priceMap) {
     .filter((x) => x && x.changePct != null && Number.isFinite(x.changePct))
     .sort((a, b) => b.changePct - a.changePct);
 
-  const top5    = allRanked.slice(0, 5);
-  const bottom5 = allRanked.slice(-5).reverse();
+  const top7    = allRanked.slice(0, 7);
+  const bottom7 = allRanked.slice(-7).reverse();
 
   const rankLine = (x) => {
     const sign = x.changePct >= 0 ? '+' : '';
     if (x.isExtendedHours && x.extendedChangePct != null && x.sessionChangePct != null) {
       const sSign = x.sessionChangePct >= 0 ? '+' : '';
       const eSign = x.extendedChangePct >= 0 ? '+' : '';
-      return `${x.ticker} $${x.price.toFixed(2)} (${sSign}${x.sessionChangePct.toFixed(2)}% close · ${eSign}${x.extendedChangePct.toFixed(2)}% ext) [${x.cat}]`;
+      return `${x.ticker} $${x.price.toFixed(2)} (${sSign}${x.sessionChangePct.toFixed(2)}% cls · ${eSign}${x.extendedChangePct.toFixed(2)}% ext) [${x.cat}]`;
     }
     return `${x.ticker} $${x.price.toFixed(2)} (${sign}${x.changePct.toFixed(2)}%) [${x.cat}]`;
   };
 
-  const gainersBlock = top5.length    ? top5.map(rankLine).join('\n')    : 'No data';
-  const losersBlock  = bottom5.length ? bottom5.map(rankLine).join('\n') : 'No data';
+  const gainersBlock = top7.length    ? top7.map(rankLine).join('\n')    : 'No data';
+  const losersBlock  = bottom7.length ? bottom7.map(rankLine).join('\n') : 'No data';
 
   return `Watchlist market pulse for ${today}.
 ${marketContext}
@@ -461,10 +512,10 @@ ${groupSummary}
 FULL GROUP BREAKDOWN:
 ${heatBlock}
 
-TOP 5 GAINERS TODAY:
+TOP 7 GAINERS TODAY:
 ${gainersBlock}
 
-TOP 5 LOSERS TODAY:
+TOP 7 LOSERS TODAY:
 ${losersBlock}
 
 Produce exactly this format — tight, no filler:
@@ -477,10 +528,10 @@ Produce exactly this format — tight, no filler:
 [3-5 lines total — skip thin groups with 1-2 tickers.]
 
 🟢 TOP GAINERS
-[Each of the top 5: ticker +X.X% [group] — one sentence on why.]
+[Each of the top 7: ticker +X.X% [group] — one sentence on why.]
 
 🔴 TOP LOSERS
-[Each of the bottom 5: ticker -X.X% [group] — one sentence on why.]
+[Each of the bottom 7: ticker -X.X% [group] — one sentence on why.]
 
 ⚡ ONE SETUP
 [The single most interesting ticker today. One sentence. Specific price level.]`;
@@ -530,8 +581,42 @@ export default function Intelligence() {
     sector:  { ...IDLE },
     pulse:   { ...IDLE },
   });
-  // Store abort controllers per brief so we can cancel mid-stream
   const abortRefs = useRef({});
+
+  // Sector Analysis: selected groups — loaded from Supabase, saved on change
+  const [selectedGroups, setSelectedGroups] = useState([]);
+  const [allGroups, setAllGroups] = useState([]);
+  const [groupSelectorOpen, setGroupSelectorOpen] = useState(false);
+  const [groupsLoading, setGroupsLoading] = useState(true);
+
+  // Load available groups + saved preferences on mount
+  useEffect(() => {
+    (async () => {
+      await authReady();
+      const [wlRes, prefRes] = await Promise.all([
+        supabase.from('watchlist').select('category').eq('is_active', true),
+        supabase.from('user_preferences').select('value').eq('key', 'sector_analysis_groups').maybeSingle(),
+      ]);
+      if (wlRes.data) {
+        const cats = [...new Set(wlRes.data.map((r) => r.category || 'Uncategorized'))].sort();
+        setAllGroups(cats);
+        // Default to all groups if no preference saved yet
+        const saved = prefRes.data?.value;
+        setSelectedGroups(Array.isArray(saved) ? saved : cats);
+      }
+      setGroupsLoading(false);
+    })();
+  }, []);
+
+  const saveSelectedGroups = useCallback(async (groups) => {
+    setSelectedGroups(groups);
+    await authReady();
+    await supabase.from('user_preferences').upsert({
+      key: 'sector_analysis_groups',
+      value: groups,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'key' });
+  }, []);
 
   const setBrief = useCallback((id, patch) => {
     setBriefs((prev) => {
@@ -578,7 +663,9 @@ export default function Intelligence() {
         system: brief.system,
         messages: [{
           role: 'user',
-          content: (brief.id === 'pulse' || brief.id === 'sector')
+          content: brief.id === 'sector'
+            ? brief.buildPrompt(data, priceMap, selectedGroups)
+            : (brief.id === 'pulse')
             ? brief.buildPrompt(data, priceMap)
             : brief.buildPrompt(data),
         }],
@@ -662,13 +749,25 @@ export default function Intelligence() {
         {/* Brief cards */}
         <div className="space-y-10">
           {BRIEFS.map((brief) => (
-            <BriefCard
-              key={brief.id}
-              brief={brief}
-              state={briefs[brief.id]}
-              onRun={() => run(brief)}
-              onStop={() => stop(brief.id)}
-            />
+            <div key={brief.id}>
+              {/* Group selector — only for sector brief */}
+              {brief.id === 'sector' && (
+                <GroupSelector
+                  allGroups={allGroups}
+                  selectedGroups={selectedGroups}
+                  loading={groupsLoading}
+                  open={groupSelectorOpen}
+                  onToggle={() => setGroupSelectorOpen((v) => !v)}
+                  onChange={saveSelectedGroups}
+                />
+              )}
+              <BriefCard
+                brief={brief}
+                state={briefs[brief.id]}
+                onRun={() => run(brief)}
+                onStop={() => stop(brief.id)}
+              />
+            </div>
           ))}
         </div>
 
@@ -676,6 +775,90 @@ export default function Intelligence() {
           Know before you act.
         </footer>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Group selector — shown above Sector Analysis card
+// ---------------------------------------------------------------------------
+
+function GroupSelector({ allGroups, selectedGroups, loading, open, onToggle, onChange }) {
+  const selectedCount = selectedGroups.length;
+  const allSelected  = selectedCount === allGroups.length;
+
+  const toggle = (group) => {
+    const next = selectedGroups.includes(group)
+      ? selectedGroups.filter((g) => g !== group)
+      : [...selectedGroups, group];
+    onChange(next);
+  };
+
+  const toggleAll = () => {
+    onChange(allSelected ? [] : [...allGroups]);
+  };
+
+  return (
+    <div className="mb-3 rounded-md border border-neutral-800 bg-neutral-950/60">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between px-4 py-3 text-[12px] text-neutral-400 hover:text-neutral-200 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <Settings className="h-3.5 w-3.5" strokeWidth={1.75} />
+          <span className="uppercase tracking-[0.15em]">Focus groups</span>
+          {!loading && (
+            <span className="font-mono text-[10px] text-neutral-600">
+              {selectedCount}/{allGroups.length} selected
+            </span>
+          )}
+        </div>
+        <span className="text-neutral-600 text-[10px]">{open ? '▲' : '▼'}</span>
+      </button>
+
+      {open && (
+        <div className="border-t border-neutral-800 px-4 py-3">
+          {loading ? (
+            <div className="text-[12px] text-neutral-600">Loading groups…</div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-[11px] text-neutral-500">
+                  Select which groups Sector Analysis focuses on
+                </div>
+                <button
+                  type="button"
+                  onClick={toggleAll}
+                  className="text-[11px] text-sky-400 hover:text-sky-300 transition-colors"
+                >
+                  {allSelected ? 'Deselect all' : 'Select all'}
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {allGroups.map((group) => {
+                  const active = selectedGroups.includes(group);
+                  return (
+                    <button
+                      key={group}
+                      type="button"
+                      onClick={() => toggle(group)}
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium uppercase tracking-[0.1em] transition-all ${
+                        active
+                          ? 'border-sky-500/60 bg-sky-500/10 text-sky-200'
+                          : 'border-neutral-800 text-neutral-600 hover:border-neutral-600 hover:text-neutral-400'
+                      }`}
+                    >
+                      {active && <Check className="h-3 w-3" strokeWidth={2.5} />}
+                      {group}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
