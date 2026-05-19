@@ -194,12 +194,22 @@ export default function Watchlist() {
     return result;
   }, [groups, priceMap]);
 
-  // daily pinned first, rest alphabetical
+  // daily pinned first, rest sorted by avg % change hottest → coldest
+  // groups with no price data fall to the bottom, sorted alpha among themselves
   const categories = useMemo(() => {
     const keys = Object.keys(groups);
-    const others = keys.filter((k) => k !== 'daily').sort();
+    const others = keys
+      .filter((k) => k !== 'daily')
+      .sort((a, b) => {
+        const avgA = groupAvg[a] ?? null;
+        const avgB = groupAvg[b] ?? null;
+        if (avgA == null && avgB == null) return a.localeCompare(b);
+        if (avgA == null) return 1;
+        if (avgB == null) return -1;
+        return avgB - avgA;
+      });
     return keys.includes('daily') ? ['daily', ...others] : others;
-  }, [groups]);
+  }, [groups, groupAvg]);
 
   // Auto-select first category when data loads.
   useEffect(() => {
