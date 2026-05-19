@@ -62,26 +62,38 @@ async function fetchCloses(ticker) {
 }
 
 // Detect market hours by checking actual NYSE schedule (9:30–16:00 ET).
-// ET = UTC-4 during EDT (Mar–Nov), UTC-5 during EST (Nov–Mar).
-function isNYSEMarketHours() {
-  const now = new Date();
-  // Determine ET offset: EDT is UTC-4, EST is UTC-5
-  // Simple approximation: EDT runs second Sunday of March through first Sunday of November
-  const jan = new Date(now.getFullYear(), 0, 1).getTimezoneOffset();
-  const jul = new Date(now.getFullYear(), 6, 1).getTimezoneOffset();
-  const isDST = now.getTimezoneOffset() < Math.max(jan, jul);
-  const etOffset = isDST ? -4 : -5; // hours from UTC
+// Runs server-side on Vercel (UTC), so we compute ET offset from UTC directly.
+// EDT = UTC-4 (second Sunday March → first Sunday November)
+// EST = UTC-5 (otherwise)
+function isNYSEMarketHours(now = new Date()) {
+  const year = now.getUTCFullYear();
 
-  const etHours = now.getUTCHours() + etOffset + now.getUTCMinutes() / 60;
-  const dayOfWeek = now.getUTCDay(); // 0=Sun, 6=Sat — adjust for ET midnight crossings
-  // Adjust day if ET offset crosses midnight
-  const etDay = (dayOfWeek + (now.getUTCHours() + etOffset < 0 ? -1 : 0) + 7) % 7;
+  // Find second Sunday of March (EDT starts 2:00 AM ET)
+  const edtStart = new Date(Date.UTC(year, 2, 1)); // March 1
+  let sunCount = 0;
+  while (sunCount < 2) {
+    if (edtStart.getUTCDay() === 0) sunCount++;
+    if (sunCount < 2) edtStart.setUTCDate(edtStart.getUTCDate() + 1);
+  }
+  // EDT starts at 07:00 UTC (2 AM ET + 5 hours)
+  edtStart.setUTCHours(7, 0, 0, 0);
 
-  // Weekend: never market hours
-  if (etDay === 0 || etDay === 6) return false;
+  // Find first Sunday of November (EST resumes 2:00 AM ET)
+  const estStart = new Date(Date.UTC(year, 10, 1)); // November 1
+  while (estStart.getUTCDay() !== 0) {
+    estStart.setUTCDate(estStart.getUTCDate() + 1);
+  }
+  // EST resumes at 06:00 UTC (2 AM ET + 4 hours, since still EDT at that moment)
+  estStart.setUTCHours(6, 0, 0, 0);
 
-  // Market hours: 9:30–16:00 ET
-  return etHours >= 9.5 && etHours < 16;
+  const isEDT = now >= edtStart && now < estStart;
+  const etOffsetHours = isEDT ? -4 : -5;
+
+  const etHours = now.getUTCHours() + etOffsetHours + now.getUTCMinutes() / 60;
+  const etDay   = (now.getUTCDay() + (now.getUTCHours() + etOffsetHours < 0 ? -1 : 0) + 7) % 7;
+
+  if (etDay === 0 || etDay === 6) return false; // weekend
+  return etHours >= 9.5 && etHours < 16;        // 9:30 AM – 4:00 PM ET
 }
 
 export default async function handler(req, res) {
