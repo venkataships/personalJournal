@@ -315,10 +315,12 @@ function buildSectorPrompt(d, priceMap, selectedGroups) {
     weekday: 'long', month: 'short', day: 'numeric',
   });
 
-  // Filter watchlist to selected groups only
-  const focused = selectedGroups.length > 0
-    ? d.watchlist.filter((w) => selectedGroups.includes(w.category || 'Uncategorized'))
-    : d.watchlist;
+  // Filter watchlist to selected groups only.
+  // If nothing selected (preference not loaded yet), show nothing.
+  const activeGroups = selectedGroups.length > 0 ? selectedGroups : [];
+  const focused = d.watchlist.filter((w) =>
+    activeGroups.includes(w.category || 'Uncategorized')
+  );
 
   // Build group blocks for selected groups only
   const byCategory = {};
@@ -334,20 +336,10 @@ function buildSectorPrompt(d, priceMap, selectedGroups) {
       if (!q || q.price == null) return `${w.ticker} (no price)`;
       return `${w.ticker} $${q.price.toFixed(2)}`;
     }).join(', ');
-
-    const changes = items
-      .map((w) => {
-        const q = priceMap?.get(w.ticker.toUpperCase());
-        return q?.extendedChangePct ?? q?.sessionChangePct ?? null;
-      })
-      .filter((c) => c != null && Number.isFinite(c));
-    const avg = changes.length ? changes.reduce((s, c) => s + c, 0) / changes.length : null;
-    const avgStr = avg != null ? `avg ${avg >= 0 ? '+' : ''}${avg.toFixed(2)}%` : 'no price data';
-
-    return `${cat.toUpperCase()} (${items.length} tickers, ${avgStr})\n  ${tickers}`;
+    return `${cat.toUpperCase()} (${items.length} tickers)\n  ${tickers}`;
   }).join('\n\n');
 
-  // Also include macro group for context even if not selected
+  // Always include macro group regardless of selection
   const macroItems = d.watchlist.filter((w) => (w.category || '').toLowerCase() === 'macro');
   const macroBlock = macroItems.length > 0 ? (() => {
     const tickers = macroItems.map((w) => {
@@ -358,37 +350,31 @@ function buildSectorPrompt(d, priceMap, selectedGroups) {
     return `MACRO: ${tickers}`;
   })() : '';
 
-  return `Sector-focused analysis for ${today}.
+  if (!focused.length) {
+    return `No groups selected for sector analysis on ${today}. Please select at least one group using the Focus Groups selector above.`;
+  }
 
-MACRO CONTEXT (always include regardless of focus):
-${macroBlock || 'No macro tickers in watchlist.'}
+  return `Sector analysis for ${today}. Use ONLY the price data I provide below. Do not add your own market commentary or news context.
 
-MY FOCUSED GROUPS (with live prices):
-${groupBlocks || 'No data for selected groups.'}
+MACRO (always shown):
+${macroBlock || 'No macro tickers.'}
 
-ACTIVE CATALYSTS (for context):
-${fmtCatalysts(d.catalysts)}
+MY SELECTED GROUPS (${activeGroups.join(', ')}):
+${groupBlocks}
 
-You are a sector analyst with access to real-time market knowledge up to your training cutoff.
-For each of my focused groups above:
-1. Use the live prices I provided to assess today's price action
-2. Apply YOUR OWN knowledge: what is happening in this sector today? Recent news, macro tailwinds/headwinds, earnings, regulatory moves, institutional flows — anything relevant you know about
-3. Tell me if my watchlist price action CONFIRMS or CONTRADICTS the broader sector narrative you know about
-
-Produce exactly this format:
+Produce exactly this format — based on prices only, no external context:
 
 📊 SECTOR ANALYSIS — ${today}
 
 🌐 MACRO READ
-[Risk-on or risk-off today based on the macro tickers? One sentence.]
+[One sentence: what the macro basket prices suggest about risk-on/off today.]
 
 ${Object.keys(byCategory).map(cat => `🔍 ${cat.toUpperCase()}
-[Price action: what my tickers show today]
-[Your context: what you know about this sector/news/macro right now — be specific, name catalysts, earnings, regulatory events, macro drivers]
-[Signal: bullish / bearish / neutral — and why]`).join('\n\n')}
+[Price action: what the prices show — which tickers are highest/lowest, spread, notable levels]
+[Signal: bullish / bearish / neutral based on price levels and dispersion]`).join('\n\n')}
 
-⚡ HIGHEST CONVICTION CALL
-[Based on price action + your sector knowledge, the single best setup right now. Ticker, price, why today specifically.]`;
+⚡ BEST PRICE SETUP
+[The single most interesting ticker from the selected groups based on price. Ticker, price, one sentence.]`;
 }
 
 
@@ -515,6 +501,8 @@ export default function Intelligence() {
   const [allGroups, setAllGroups] = useState([]);
   const [groupSelectorOpen, setGroupSelectorOpen] = useState(false);
   const [groupsLoading, setGroupsLoading] = useState(true);
+  // Ref ensures run() always reads the latest selectedGroups, not a stale closure
+  const selectedGroupsRef = useRef([]);
 
   // Load available groups + saved preferences on mount
   useEffect(() => {
@@ -529,7 +517,9 @@ export default function Intelligence() {
         setAllGroups(cats);
         // Default to all groups if no preference saved yet
         const saved = prefRes.data?.value;
-        setSelectedGroups(Array.isArray(saved) ? saved : cats);
+        const groups = Array.isArray(saved) ? saved : cats;
+        setSelectedGroups(groups);
+        selectedGroupsRef.current = groups;
       }
       setGroupsLoading(false);
     })();
@@ -537,6 +527,7 @@ export default function Intelligence() {
 
   const saveSelectedGroups = useCallback(async (groups) => {
     setSelectedGroups(groups);
+    selectedGroupsRef.current = groups;
     await authReady();
     await supabase.from('user_preferences').upsert({
       key: 'sector_analysis_groups',
@@ -591,7 +582,7 @@ export default function Intelligence() {
         messages: [{
           role: 'user',
           content: brief.id === 'sector'
-            ? brief.buildPrompt(data, priceMap, selectedGroups)
+            ? brief.buildPrompt(data, priceMap, selectedGroupsRef.current)
             : (brief.id === 'pulse')
             ? brief.buildPrompt(data, priceMap)
             : brief.buildPrompt(data),
