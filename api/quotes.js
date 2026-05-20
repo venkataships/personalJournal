@@ -41,9 +41,37 @@ function isNYSEOpen(now = new Date()) {
   return etHour >= 9.5 && etHour < 16;
 }
 
+// True only before 9:30 AM ET on a weekday — today's Yahoo bar doesn't exist yet
+function isBeforeMarketOpen(now = new Date()) {
+  const year = now.getUTCFullYear();
+  const edtStart = new Date(Date.UTC(year, 2, 1));
+  let suns = 0;
+  while (suns < 2) {
+    if (edtStart.getUTCDay() === 0) suns++;
+    if (suns < 2) edtStart.setUTCDate(edtStart.getUTCDate() + 1);
+  }
+  edtStart.setUTCHours(7, 0, 0, 0);
+  const estStart = new Date(Date.UTC(year, 10, 1));
+  while (estStart.getUTCDay() !== 0) estStart.setUTCDate(estStart.getUTCDate() + 1);
+  estStart.setUTCHours(6, 0, 0, 0);
+  const etOffset = (now >= edtStart && now < estStart) ? -4 : -5;
+
+  // Convert UTC time to ET — handle midnight crossover by working in total minutes
+  const utcMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const etMinutes  = utcMinutes + etOffset * 60;
+  const etHour     = ((etMinutes % 1440) + 1440) % 1440 / 60; // normalize to 0-24
+
+  // Adjust weekday for ET midnight crossover
+  const utcDay = now.getUTCDay();
+  const etDay  = ((utcDay + (etMinutes < 0 ? -1 : 0)) + 7) % 7;
+
+  if (etDay === 0 || etDay === 6) return true;  // weekend — no today bar
+  return etHour < 9.5;                          // before open — no today bar yet
+}
+
 // Mirrors: yf.download(ticker, period='5d', interval='1d')['Close'].iloc[-2]
-// Market open: today partial bar exists → prev close = second-to-last
-// Extended: today bar not started → prev close = last
+// Pre-market (before 9:30 AM ET): today's bar doesn't exist yet → prev close = last bar = yesterday
+// Market hours + after hours (9:30 AM+ ET): today's bar exists → prev close = second-to-last = yesterday
 async function fetchPrevClose(ticker, marketOpen) {
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=5d&interval=1d&includePrePost=false`;
@@ -53,9 +81,15 @@ async function fetchPrevClose(ticker, marketOpen) {
     const closes = json?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? [];
     const valid = closes.filter((c) => c != null && Number.isFinite(c));
     if (!valid.length) return null;
-    return marketOpen
-      ? (valid.length >= 2 ? valid[valid.length - 2] : valid[valid.length - 1])
-      : valid[valid.length - 1];
+
+    // Determine if today's bar exists in Yahoo's data yet.
+    // Today's bar appears once the market opens (9:30 AM ET) or sometimes slightly after.
+    // Pre-market: no today bar → take last (= yesterday)
+    // Market hours / after hours: today bar exists → take second-to-last (= yesterday)
+    const isPreMarket = isBeforeMarketOpen();
+    return isPreMarket
+      ? valid[valid.length - 1]                                                        // yesterday
+      : (valid.length >= 2 ? valid[valid.length - 2] : valid[valid.length - 1]);      // yesterday
   } catch {
     return null;
   }
@@ -94,7 +128,7 @@ export default async function handler(req, res) {
 
     // Fetch all prev closes in parallel — same as yfinance batch
     const prevCloses = Object.fromEntries(
-      await Promise.all(tickers.map(async (t) => [t, await fetchPrevClose(t, marketOpen)]))
+      await Promise.all(tickers.map(async (t) => [t, await fetchPrevClose(t)]))
     );
 
     const result = {};
