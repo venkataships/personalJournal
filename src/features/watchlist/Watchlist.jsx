@@ -86,14 +86,13 @@ async function fetchPositionTickers() {
 }
 
 // Fetch live prices via /api/quotes serverless function.
-// Returns Map<ticker, { price, sessionChangePct, extendedChangePct, isExtendedHours }>
-// Same logic as Intelligence briefs — both session and extended hours change.
+// Returns Map<ticker, { price, changePct, prevClose }>
+// Price = (bid+ask)/2 mid. changePct = (price - prevClose) / prevClose * 100
 async function fetchPrices(tickers) {
   if (!tickers.length) return new Map();
   const unique = [...new Set(tickers.map((t) => t.toUpperCase()))];
-  // Batch in chunks of 50 to stay within URL length limits
-  const CHUNK = 50;
-  const map = new Map();
+  const CHUNK  = 50;
+  const map    = new Map();
   for (let i = 0; i < unique.length; i += CHUNK) {
     const symbols = unique.slice(i, i + CHUNK).join(',');
     try {
@@ -105,13 +104,12 @@ async function fetchPrices(tickers) {
       for (const [sym, q] of Object.entries(data)) {
         if (!q || q.price == null) continue;
         map.set(sym.toUpperCase(), {
-          price:             q.price,
-          sessionChangePct:  q.sessionChangePct  ?? null,
-          extendedChangePct: q.extendedChangePct ?? null,
-          isExtendedHours:   q.isExtendedHours   ?? false,
+          price:     q.price,
+          changePct: q.changePct ?? null,
+          prevClose: q.prevClose ?? null,
         });
       }
-    } catch { /* non-fatal — prices degrade gracefully */ }
+    } catch { /* non-fatal */ }
   }
   return map;
 }
@@ -182,10 +180,7 @@ export default function Watchlist() {
     const result = {};
     for (const [cat, tickers] of Object.entries(groups)) {
       const changes = tickers
-        .map((r) => {
-          const q = priceMap.get(r.ticker.toUpperCase());
-          return q?.extendedChangePct ?? q?.sessionChangePct ?? null;
-        })
+        .map((r) => priceMap.get(r.ticker.toUpperCase())?.changePct ?? null)
         .filter((c) => c != null && Number.isFinite(c));
       result[cat] = changes.length
         ? changes.reduce((s, c) => s + c, 0) / changes.length
@@ -494,40 +489,15 @@ function TickerRow({ row, inPositions, showCategory, quote, onEdit, onDelete }) 
   // Format price display — same dual-% logic as Intelligence
   const priceDisplay = (() => {
     if (!quote || quote.price == null) return null;
-    const priceStr = `$${quote.price.toFixed(2)}`;
-    if (quote.isExtendedHours) {
-      const sStr = quote.sessionChangePct != null
-        ? `${quote.sessionChangePct >= 0 ? '+' : ''}${quote.sessionChangePct.toFixed(2)}%`
-        : null;
-      const eStr = quote.extendedChangePct != null
-        ? `${quote.extendedChangePct >= 0 ? '+' : ''}${quote.extendedChangePct.toFixed(2)}%`
-        : null;
-      const ePctColor = quote.extendedChangePct == null ? 'text-neutral-500'
-        : quote.extendedChangePct > 0 ? 'text-emerald-400'
-        : quote.extendedChangePct < 0 ? 'text-red-400'
-        : 'text-neutral-400';
-      const sPctColor = quote.sessionChangePct == null ? 'text-neutral-500'
-        : quote.sessionChangePct > 0 ? 'text-emerald-400'
-        : quote.sessionChangePct < 0 ? 'text-red-400'
-        : 'text-neutral-400';
-      return (
-        <div className="text-right">
-          <div className="font-mono text-[13px] text-neutral-100">{priceStr}</div>
-          {sStr && <div className={`font-mono text-[11px] ${sPctColor}`}>{sStr} cls</div>}
-          {eStr && <div className={`font-mono text-[11px] ${ePctColor}`}>{eStr} ext</div>}
-        </div>
-      );
-    }
-    // Market hours — just session change
-    const pct = quote.sessionChangePct;
-    const pctColor = pct == null ? 'text-neutral-500'
-      : pct > 0 ? 'text-emerald-400'
-      : pct < 0 ? 'text-red-400'
-      : 'text-neutral-400';
-    const pctStr = pct != null ? `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%` : null;
+    const pct      = quote.changePct;
+    const pctColor = pct == null    ? 'text-neutral-500'
+                   : pct > 0       ? 'text-emerald-400'
+                   : pct < 0       ? 'text-red-400'
+                   :                 'text-neutral-400';
+    const pctStr   = pct != null ? `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%` : null;
     return (
       <div className="text-right">
-        <div className="font-mono text-[13px] text-neutral-100">{priceStr}</div>
+        <div className="font-mono text-[13px] text-neutral-100">${quote.price.toFixed(2)}</div>
         {pctStr && <div className={`font-mono text-[11px] ${pctColor}`}>{pctStr}</div>}
       </div>
     );

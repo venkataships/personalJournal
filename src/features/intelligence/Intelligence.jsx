@@ -82,8 +82,8 @@ async function fetchAll() {
 
 // ---------------------------------------------------------------------------
 // Live price fetching — Public API via /api/quotes serverless function.
-// Returns mid = (bid+ask)/2 per quote.py logic. Just price for now.
-// Map<ticker, { price, mid, last, bid, ask }>
+// Returns Map<ticker, { price, changePct, prevClose, mid, last }>
+// Price = (bid+ask)/2 mid. changePct = (price - prevClose) / prevClose * 100
 // ---------------------------------------------------------------------------
 
 async function fetchPrices(tickers) {
@@ -104,15 +104,11 @@ async function fetchPrices(tickers) {
     for (const [sym, q] of Object.entries(data)) {
       if (!q || !q.price) continue;
       map.set(sym.toUpperCase(), {
-        price:             q.price,  // mid if available, last otherwise
-        mid:               q.mid    ?? null,
-        last:              q.last   ?? null,
-        bid:               q.bid    ?? null,
-        ask:               q.ask    ?? null,
-        // Change % fields — null until confirmed working
-        sessionChangePct:  null,
-        extendedChangePct: null,
-        isExtendedHours:   false,
+        price:     q.price,
+        changePct: q.changePct ?? null,
+        prevClose: q.prevClose ?? null,
+        mid:       q.mid       ?? null,
+        last:      q.last      ?? null,
       });
     }
     return map;
@@ -257,32 +253,46 @@ function buildSectorHeatBlock(watchlist, priceMap) {
   const priceLine = (ticker) => {
     const q = priceMap?.get(ticker.toUpperCase());
     if (!q || q.price == null) return null;
-    return `${ticker} $${q.price.toFixed(2)}`;
+    const priceStr = `$${q.price.toFixed(2)}`;
+    if (q.changePct != null) {
+      const sign = q.changePct >= 0 ? '+' : '';
+      return `${ticker} ${priceStr} (${sign}${q.changePct.toFixed(2)}%)`;
+    }
+    return `${ticker} ${priceStr}`;
   };
 
   const rows = Object.entries(byCategory).map(([cat, tickers]) => {
+    const changes = tickers
+      .map((t) => priceMap?.get(t.toUpperCase())?.changePct)
+      .filter((c) => c != null && Number.isFinite(c));
+    const avg = changes.length
+      ? changes.reduce((s, c) => s + c, 0) / changes.length
+      : null;
+    const avgStr = avg != null
+      ? (avg >= 0 ? `+${avg.toFixed(2)}` : avg.toFixed(2)) + '%'
+      : 'no data';
     const tickerLines = tickers.map(priceLine).filter(Boolean).join(' | ');
-    const priceCount  = tickers.filter((t) => priceMap?.get(t.toUpperCase())?.price != null).length;
-    return { cat, avg: null, tickerLines, count: tickers.length, priceCount };
+    return { cat, avg, avgStr, tickerLines, count: tickers.length };
   });
 
-  // Macro pinned first, rest alpha (no avg to sort by — % coming later)
-  // Skip thin groups (under 3 tickers)
   const macro  = rows.find((r) => r.cat.toLowerCase() === 'macro' && r.count >= 2);
   const others = rows
     .filter((r) => r.cat.toLowerCase() !== 'macro' && r.count >= 3)
-    .sort((a, b) => a.cat.localeCompare(b.cat));
+    .sort((a, b) => {
+      if (a.avg == null && b.avg == null) return a.cat.localeCompare(b.cat);
+      if (a.avg == null) return 1;
+      if (b.avg == null) return -1;
+      return b.avg - a.avg;
+    });
 
-  // Top 5 and bottom 5 — arbitrary split for now, sorted alpha
   const top5    = others.slice(0, 5);
   const bottom5 = others.slice(-5).filter((r) => !top5.includes(r));
   const selected = [...top5, ...bottom5];
-
-  const ordered = macro ? [macro, ...selected] : selected;
+  const ordered  = macro ? [macro, ...selected] : selected;
 
   return ordered
-    .map(({ cat, tickerLines, count }) =>
-      `${cat.toUpperCase()} (${count} tickers)\n  ${tickerLines || '(no price data)'}`)
+    .map(({ cat, avgStr, tickerLines, count }) =>
+      `${cat.toUpperCase()} (${count} tickers, avg ${avgStr})\n  ${tickerLines || '(no price data)'}`)
     .join('\n\n');
 }
 
@@ -304,8 +314,13 @@ function buildGroupSummaryLine(watchlist, priceMap) {
   const ordered = macro ? [macro, ...others] : others;
   return ordered
     .map((cat) => {
-      const count = watchlist.filter((w) => (w.category || 'Uncategorized') === cat).length;
-      return `${cat} (${count})`;
+      const tickers = watchlist.filter((w) => (w.category || 'Uncategorized') === cat);
+      const changes = tickers
+        .map((w) => priceMap?.get(w.ticker.toUpperCase())?.changePct)
+        .filter((c) => c != null && Number.isFinite(c));
+      const avg = changes.length ? changes.reduce((s, c) => s + c, 0) / changes.length : null;
+      const avgStr = avg != null ? ` ${avg >= 0 ? '+' : ''}${avg.toFixed(2)}%` : '';
+      return `${cat}${avgStr}`;
     })
     .join(' | ');
 }
@@ -334,7 +349,8 @@ function buildSectorPrompt(d, priceMap, selectedGroups) {
     const tickers = items.map((w) => {
       const q = priceMap?.get(w.ticker.toUpperCase());
       if (!q || q.price == null) return `${w.ticker} (no price)`;
-      return `${w.ticker} $${q.price.toFixed(2)}`;
+      const pct = q.changePct != null ? ` (${q.changePct >= 0 ? '+' : ''}${q.changePct.toFixed(2)}%)` : '';
+      return `${w.ticker} $${q.price.toFixed(2)}${pct}`;
     }).join(', ');
     return `${cat.toUpperCase()} (${items.length} tickers)\n  ${tickers}`;
   }).join('\n\n');
@@ -345,7 +361,8 @@ function buildSectorPrompt(d, priceMap, selectedGroups) {
     const tickers = macroItems.map((w) => {
       const q = priceMap?.get(w.ticker.toUpperCase());
       if (!q || q.price == null) return w.ticker;
-      return `${w.ticker} $${q.price.toFixed(2)}`;
+      const pct = q.changePct != null ? ` (${q.changePct >= 0 ? '+' : ''}${q.changePct.toFixed(2)}%)` : '';
+      return `${w.ticker} $${q.price.toFixed(2)}${pct}`;
     }).join(', ');
     return `MACRO: ${tickers}`;
   })() : '';
@@ -392,26 +409,23 @@ function buildPulsePrompt(d, priceMap) {
   // Full heat block for the detailed breakdown
   const heatBlock = buildSectorHeatBlock(d.watchlist, priceMap);
 
-  // All tickers with prices — sorted by price descending for now
-  // (change % ranking will be re-enabled once price feed is confirmed stable)
-  const allWithPrices = d.watchlist
+  // Rank all tickers by changePct
+  const allRanked = d.watchlist
     .map((w) => {
       const q = priceMap.get(w.ticker.toUpperCase());
-      if (!q || q.price == null) return null;
-      return {
-        ticker: w.ticker,
-        cat:    w.category || 'Uncategorized',
-        price:  q.price,
-      };
+      if (!q || q.price == null || q.changePct == null) return null;
+      return { ticker: w.ticker, cat: w.category || 'Uncategorized', price: q.price, changePct: q.changePct };
     })
     .filter(Boolean)
-    .sort((a, b) => b.price - a.price);
+    .sort((a, b) => b.changePct - a.changePct);
 
-  const top7    = allWithPrices.slice(0, 7);
-  const bottom7 = allWithPrices.slice(-7).reverse();
+  const top7    = allRanked.slice(0, 7);
+  const bottom7 = allRanked.slice(-7).reverse();
 
-  const rankLine = (x) =>
-    `${x.ticker} $${x.price.toFixed(2)} [${x.cat}]`;
+  const rankLine = (x) => {
+    const sign = x.changePct >= 0 ? '+' : '';
+    return `${x.ticker} $${x.price.toFixed(2)} (${sign}${x.changePct.toFixed(2)}%) [${x.cat}]`;
+  };
 
   const gainersBlock = top7.length    ? top7.map(rankLine).join('\n')    : 'No data';
   const losersBlock  = bottom7.length ? bottom7.map(rankLine).join('\n') : 'No data';
