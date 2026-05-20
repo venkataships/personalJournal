@@ -81,36 +81,38 @@ async function fetchAll() {
 }
 
 // ---------------------------------------------------------------------------
-// Live price fetching — Yahoo Finance batch quote (unofficial but stable)
-// One request for all tickers via /api/quotes serverless function.
-// Returns Map<ticker, { price, sessionChangePct, extendedChangePct, isExtendedHours, ... }>
+// Live price fetching — Public API via /api/quotes serverless function.
+// Returns mid = (bid+ask)/2 per quote.py logic. Just price for now.
+// Map<ticker, { price, mid, last, bid, ask }>
+// ---------------------------------------------------------------------------
 
 async function fetchPrices(tickers) {
   if (!tickers.length) return new Map();
-  const unique = [...new Set(tickers.map((t) => t.toUpperCase()))];
+  const unique  = [...new Set(tickers.map((t) => t.toUpperCase()))];
   const symbols = unique.join(',');
-  const url = `/api/quotes?symbols=${symbols}`;
 
   try {
-    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    const res = await fetch(`/api/quotes?symbols=${symbols}`, {
+      headers: { Accept: 'application/json' },
+    });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(`Quote fetch HTTP ${res.status}: ${err.error || ''}`);
     }
     const data = await res.json();
-    const map = new Map();
+    const map  = new Map();
     for (const [sym, q] of Object.entries(data)) {
-      if (!q || q.price == null) continue;
+      if (!q || !q.price) continue;
       map.set(sym.toUpperCase(), {
-        price:             q.price,
-        closePrice:        q.closePrice        ?? null,
-        prevClose:         q.prevClose         ?? null,
-        sessionChangePct:  q.sessionChangePct  ?? null,
-        extendedChangePct: q.extendedChangePct ?? null,
-        isExtendedHours:   q.isExtendedHours   ?? false,
-        bid:               q.bid               ?? null,
-        ask:               q.ask               ?? null,
-        mid:               q.mid               ?? null,
+        price:             q.price,  // mid if available, last otherwise
+        mid:               q.mid    ?? null,
+        last:              q.last   ?? null,
+        bid:               q.bid    ?? null,
+        ask:               q.ask    ?? null,
+        // Change % fields — null until confirmed working
+        sessionChangePct:  null,
+        extendedChangePct: null,
+        isExtendedHours:   false,
       });
     }
     return map;
@@ -255,65 +257,32 @@ function buildSectorHeatBlock(watchlist, priceMap) {
   const priceLine = (ticker) => {
     const q = priceMap?.get(ticker.toUpperCase());
     if (!q || q.price == null) return null;
-
-    const priceStr = `$${q.price.toFixed(2)}`;
-
-    if (q.isExtendedHours) {
-      const sStr = q.sessionChangePct != null
-        ? `${q.sessionChangePct >= 0 ? '+' : ''}${q.sessionChangePct.toFixed(2)}% cls`
-        : 'cls N/A';
-      const eStr = q.extendedChangePct != null
-        ? `${q.extendedChangePct >= 0 ? '+' : ''}${q.extendedChangePct.toFixed(2)}% ext`
-        : '';
-      return `${ticker} ${priceStr} (${sStr}${eStr ? ' · ' + eStr : ''})`;
-    }
-
-    const pct = q.sessionChangePct != null
-      ? `${q.sessionChangePct >= 0 ? '+' : ''}${q.sessionChangePct.toFixed(2)}%`
-      : 'chg N/A';
-    return `${ticker} ${priceStr} (${pct})`;
+    return `${ticker} $${q.price.toFixed(2)}`;
   };
 
   const rows = Object.entries(byCategory).map(([cat, tickers]) => {
-    const changes = tickers
-      .map((t) => (q => (q?.extendedChangePct ?? q?.sessionChangePct))(priceMap?.get(t.toUpperCase())))
-      .filter((c) => c != null && Number.isFinite(c));
-    const avg = changes.length
-      ? changes.reduce((s, c) => s + c, 0) / changes.length
-      : null;
-    const avgStr = avg != null
-      ? (avg >= 0 ? `+${avg.toFixed(2)}` : avg.toFixed(2)) + '%'
-      : 'no price data';
-    const tickerLines = tickers.map(priceLine).join(' | ');
-    return { cat, avg: avg ?? null, avgStr, tickerLines, count: tickers.length };
+    const tickerLines = tickers.map(priceLine).filter(Boolean).join(' | ');
+    const priceCount  = tickers.filter((t) => priceMap?.get(t.toUpperCase())?.price != null).length;
+    return { cat, avg: null, tickerLines, count: tickers.length, priceCount };
   });
 
-  // Macro pinned first, rest sorted hottest → coldest (nulls last)
-  // Skip thin groups (under 3 tickers) — not enough signal
-  const macro = rows.find((r) => r.cat.toLowerCase() === 'macro' && r.count >= 2);
+  // Macro pinned first, rest alpha (no avg to sort by — % coming later)
+  // Skip thin groups (under 3 tickers)
+  const macro  = rows.find((r) => r.cat.toLowerCase() === 'macro' && r.count >= 2);
   const others = rows
     .filter((r) => r.cat.toLowerCase() !== 'macro' && r.count >= 3)
-    .sort((a, b) => {
-      if (a.avg == null && b.avg == null) return 0;
-      if (a.avg == null) return 1;
-      if (b.avg == null) return -1;
-      return b.avg - a.avg;
-    });
+    .sort((a, b) => a.cat.localeCompare(b.cat));
 
-  // Top 5 and bottom 5 — skip the middle
+  // Top 5 and bottom 5 — arbitrary split for now, sorted alpha
   const top5    = others.slice(0, 5);
   const bottom5 = others.slice(-5).filter((r) => !top5.includes(r));
   const selected = [...top5, ...bottom5];
 
-  // Check if any ticker in the data is in extended hours
-  const anyExtended = [...(priceMap?.values() ?? [])].some((q) => q.isExtendedHours);
-  const extLabel = anyExtended ? ' [ext-hrs]' : '';
-
   const ordered = macro ? [macro, ...selected] : selected;
 
   return ordered
-    .map(({ cat, avgStr, tickerLines, count }) =>
-      `${cat.toUpperCase()} (${count} tickers, avg ${avgStr}${extLabel})\n  ${tickerLines || '(no price data)'}`)
+    .map(({ cat, tickerLines, count }) =>
+      `${cat.toUpperCase()} (${count} tickers)\n  ${tickerLines || '(no price data)'}`)
     .join('\n\n');
 }
 
@@ -329,33 +298,14 @@ function buildGroupSummaryLine(watchlist, priceMap) {
     byCategory[cat].push(w.ticker);
   }
 
-  const rows = Object.entries(byCategory).map(([cat, tickers]) => {
-    const changes = tickers
-      .map((t) => (q => (q?.extendedChangePct ?? q?.sessionChangePct))(priceMap?.get(t.toUpperCase())))
-      .filter((c) => c != null && Number.isFinite(c));
-    const avg = changes.length
-      ? changes.reduce((s, c) => s + c, 0) / changes.length
-      : null;
-    return { cat, avg };
-  });
-
-  const macro = rows.find((r) => r.cat.toLowerCase() === 'macro');
-  const others = rows
-    .filter((r) => r.cat.toLowerCase() !== 'macro')
-    .sort((a, b) => {
-      if (a.avg == null && b.avg == null) return 0;
-      if (a.avg == null) return 1;
-      if (b.avg == null) return -1;
-      return b.avg - a.avg;
-    });
-
+  const cats = [...new Set(watchlist.map((w) => w.category || 'Uncategorized'))];
+  const macro  = cats.find((c) => c.toLowerCase() === 'macro');
+  const others = cats.filter((c) => c.toLowerCase() !== 'macro').sort();
   const ordered = macro ? [macro, ...others] : others;
-
   return ordered
-    .map(({ cat, avg }) => {
-      if (avg == null) return `${cat}: —`;
-      const sign = avg >= 0 ? '+' : '';
-      return `${cat} ${sign}${avg.toFixed(2)}%`;
+    .map((cat) => {
+      const count = watchlist.filter((w) => (w.category || 'Uncategorized') === cat).length;
+      return `${cat} (${count})`;
     })
     .join(' | ');
 }
@@ -382,14 +332,7 @@ function buildSectorPrompt(d, priceMap, selectedGroups) {
     const tickers = items.map((w) => {
       const q = priceMap?.get(w.ticker.toUpperCase());
       if (!q || q.price == null) return `${w.ticker} (no price)`;
-      const priceStr = `$${q.price.toFixed(2)}`;
-      if (q.isExtendedHours) {
-        const s = q.sessionChangePct != null ? `${q.sessionChangePct >= 0 ? '+' : ''}${q.sessionChangePct.toFixed(2)}% cls` : '';
-        const e = q.extendedChangePct != null ? `${q.extendedChangePct >= 0 ? '+' : ''}${q.extendedChangePct.toFixed(2)}% ext` : '';
-        return `${w.ticker} ${priceStr} (${[s, e].filter(Boolean).join(' · ')})`;
-      }
-      const pct = q.sessionChangePct != null ? `${q.sessionChangePct >= 0 ? '+' : ''}${q.sessionChangePct.toFixed(2)}%` : '';
-      return `${w.ticker} ${priceStr} (${pct})`;
+      return `${w.ticker} $${q.price.toFixed(2)}`;
     }).join(', ');
 
     const changes = items
@@ -410,8 +353,7 @@ function buildSectorPrompt(d, priceMap, selectedGroups) {
     const tickers = macroItems.map((w) => {
       const q = priceMap?.get(w.ticker.toUpperCase());
       if (!q || q.price == null) return w.ticker;
-      const pct = q.extendedChangePct ?? q.sessionChangePct;
-      return pct != null ? `${w.ticker} ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%` : w.ticker;
+      return `${w.ticker} $${q.price.toFixed(2)}`;
     }).join(', ');
     return `MACRO: ${tickers}`;
   })() : '';
@@ -455,11 +397,8 @@ function buildPulsePrompt(d, priceMap) {
     weekday: 'long', month: 'short', day: 'numeric',
   });
 
-  // Detect if we're in pre-market mode (any ticker has isPreMarket flag)
-  const isPreMarket = [...priceMap.values()].some((q) => q.isPreMarket);
-  const marketContext = isPreMarket
-    ? 'PRE-MARKET: Prices are bid/ask midpoints vs yesterday\'s close. Treat % changes as pre-market indication, not confirmed moves.'
-    : 'MARKET HOURS: Prices are last trade prices with intraday % change.';
+  // Note market context for Claude
+  const marketContext = 'Prices are current mid (bid/ask average) from Public API.';
 
   // Compact one-liner for the header
   const groupSummary = buildGroupSummaryLine(d.watchlist, priceMap);
@@ -467,38 +406,26 @@ function buildPulsePrompt(d, priceMap) {
   // Full heat block for the detailed breakdown
   const heatBlock = buildSectorHeatBlock(d.watchlist, priceMap);
 
-  // All tickers ranked — use extended change when available, else session change
-  const allRanked = d.watchlist
+  // All tickers with prices — sorted by price descending for now
+  // (change % ranking will be re-enabled once price feed is confirmed stable)
+  const allWithPrices = d.watchlist
     .map((w) => {
       const q = priceMap.get(w.ticker.toUpperCase());
       if (!q || q.price == null) return null;
-      // Rank by the most current change: extended if available, else session
-      const changePct = q.extendedChangePct ?? q.sessionChangePct ?? null;
       return {
         ticker: w.ticker,
-        cat: w.category || 'Uncategorized',
-        changePct,
-        sessionChangePct: q.sessionChangePct,
-        extendedChangePct: q.extendedChangePct,
-        isExtendedHours: q.isExtendedHours,
-        price: q.price,
+        cat:    w.category || 'Uncategorized',
+        price:  q.price,
       };
     })
-    .filter((x) => x && x.changePct != null && Number.isFinite(x.changePct))
-    .sort((a, b) => b.changePct - a.changePct);
+    .filter(Boolean)
+    .sort((a, b) => b.price - a.price);
 
-  const top7    = allRanked.slice(0, 7);
-  const bottom7 = allRanked.slice(-7).reverse();
+  const top7    = allWithPrices.slice(0, 7);
+  const bottom7 = allWithPrices.slice(-7).reverse();
 
-  const rankLine = (x) => {
-    const sign = x.changePct >= 0 ? '+' : '';
-    if (x.isExtendedHours && x.extendedChangePct != null && x.sessionChangePct != null) {
-      const sSign = x.sessionChangePct >= 0 ? '+' : '';
-      const eSign = x.extendedChangePct >= 0 ? '+' : '';
-      return `${x.ticker} $${x.price.toFixed(2)} (${sSign}${x.sessionChangePct.toFixed(2)}% cls · ${eSign}${x.extendedChangePct.toFixed(2)}% ext) [${x.cat}]`;
-    }
-    return `${x.ticker} $${x.price.toFixed(2)} (${sign}${x.changePct.toFixed(2)}%) [${x.cat}]`;
-  };
+  const rankLine = (x) =>
+    `${x.ticker} $${x.price.toFixed(2)} [${x.cat}]`;
 
   const gainersBlock = top7.length    ? top7.map(rankLine).join('\n')    : 'No data';
   const losersBlock  = bottom7.length ? bottom7.map(rankLine).join('\n') : 'No data';
