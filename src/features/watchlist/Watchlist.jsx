@@ -714,21 +714,25 @@ function WatchlistModal({ mode, row, existingCategories, allItems, onSaved, onCa
             .from('watchlist').update(payload).eq('id', conflict.id);
           if (err) throw err;
         } else {
-          // Fresh insert
-          const { error: err } = await supabase
-            .from('watchlist').insert(payload);
-          if (err) {
-            if (err.code === '23505') {
-              // Race condition — another insert snuck in, fall back to update
-              const { error: err2 } = await supabase
-                .from('watchlist')
-                .update(payload)
-                .eq('ticker', tickerUpper)
-                .eq('is_active', true);
-              if (err2) throw err2;
-            } else {
-              throw err;
-            }
+          // Check for a soft-deleted row first — unique constraint blocks re-insert
+          // even when is_active = false. Reactivate it instead.
+          const { data: deleted } = await supabase
+            .from('watchlist')
+            .select('id')
+            .eq('ticker', tickerUpper)
+            .eq('is_active', false)
+            .maybeSingle();
+
+          if (deleted) {
+            // Reactivate the soft-deleted row with the new payload
+            const { error: err } = await supabase
+              .from('watchlist').update(payload).eq('id', deleted.id);
+            if (err) throw err;
+          } else {
+            // Genuinely new ticker — insert
+            const { error: err } = await supabase
+              .from('watchlist').insert(payload);
+            if (err) throw err;
           }
         }
       }
