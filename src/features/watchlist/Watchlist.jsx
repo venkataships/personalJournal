@@ -14,6 +14,7 @@ import {
   Search,
 } from 'lucide-react';
 import { supabase, authReady } from '../../lib/supabase';
+import MarketBar from '../../components/MarketBar';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -327,6 +328,8 @@ export default function Watchlist() {
             </div>
           )}
         </header>
+
+        <MarketBar />
 
         {loading ? (
           <div className="text-sm text-neutral-500">Loading…</div>
