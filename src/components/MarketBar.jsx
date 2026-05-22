@@ -8,6 +8,7 @@ import { RefreshCw } from 'lucide-react';
 const MARKET_TICKERS = [
   { symbol: 'SPY',  label: 'S&P 500' },
   { symbol: 'QQQ',  label: 'NASDAQ'  },
+  { symbol: 'IWM',  label: 'R2000'   }, // small caps — confirms breadth
   { symbol: 'IEF',  label: '10Y T'   }, // 7-10Y Treasury ETF — proxy for rates
   { symbol: 'GLD',  label: 'Gold'    },
   { symbol: 'USO',  label: 'Oil'     },
@@ -16,41 +17,59 @@ const MARKET_TICKERS = [
 
 // ---------------------------------------------------------------------------
 // Sentiment determination
-// SPY and QQQ are the primary signals.
-// Bonds (IEF) moving up = risk-off / defensive
-// Gold up + equities down = fear
+// Primary: weighted avg of SPY + QQQ + IWM (IWM at 0.5x — confirmation, not primary)
+// IWM lagging while SPY/QQQ lead = narrow rally, less conviction
+// Bonds (IEF) up = risk-off / defensive bid
+// Gold up + equities down = fear trade confirmed
+//
+// Thresholds (weighted avg):
+//   ≥ +0.8%           → BULLISH (strong, broad participation)
+//   ≥ +0.15%          → BULLISH
+//   -0.15% to +0.15%  → NEUTRAL
+//   ≤ -0.15%          → BEARISH
+//   ≤ -0.8% + bonds   → BEARISH (confirmed risk-off)
 // ---------------------------------------------------------------------------
 
 function determineSentiment(quotes) {
   const spy = quotes['SPY']?.changePct;
   const qqq = quotes['QQQ']?.changePct;
+  const iwm = quotes['IWM']?.changePct;
   const ief = quotes['IEF']?.changePct;
   const gld = quotes['GLD']?.changePct;
-  const btc = quotes['IBIT']?.changePct;
 
-  if (spy == null || qqq == null) return null; // not enough data
+  if (spy == null || qqq == null) return null;
 
-  const equityAvg = (spy + qqq) / 2;
-  const bondsUp   = ief != null && ief > 0.3;
-  const goldUp    = gld != null && gld > 0.5;
-  const btcUp     = btc != null && btc > 1;
+  // Weighted avg: SPY + QQQ full weight, IWM half weight (breadth confirmation)
+  const divisor    = iwm != null ? 2.5 : 2;
+  const equityAvg  = (spy + qqq + (iwm != null ? iwm * 0.5 : 0)) / divisor;
 
-  if (equityAvg >= 1.0 && !bondsUp) {
-    return { label: 'BULLISH', color: 'emerald', description: 'Equities leading — risk-on tape' };
+  // IWM lagging = narrow rally flag
+  const narrowRally = iwm != null && equityAvg > 0.15 && iwm < equityAvg - 0.4;
+  const bondsUp     = ief != null && ief > 0.25;
+  const goldUp      = gld != null && gld > 0.4;
+
+  if (equityAvg >= 0.8 && !bondsUp && !narrowRally) {
+    return { label: 'BULLISH', color: 'emerald', description: 'Broad participation — strong risk-on tape' };
   }
-  if (equityAvg >= 0.3) {
-    return { label: 'BULLISH', color: 'emerald', description: 'Moderate upside — cautiously positive' };
+  if (equityAvg >= 0.8 && narrowRally) {
+    return { label: 'BULLISH', color: 'emerald', description: 'Large-cap led — small caps lagging, watch breadth' };
   }
-  if (equityAvg <= -1.0 && bondsUp) {
+  if (equityAvg >= 0.15 && !bondsUp) {
+    return { label: 'BULLISH', color: 'emerald', description: narrowRally ? 'Modest upside, narrow breadth' : 'Cautiously positive' };
+  }
+  if (equityAvg >= 0.15 && bondsUp) {
+    return { label: 'NEUTRAL', color: 'amber', description: 'Equities up but bonds bid — mixed signals' };
+  }
+  if (equityAvg <= -0.8 && bondsUp) {
     return { label: 'BEARISH', color: 'red', description: 'Flight to safety — risk-off confirmed' };
   }
-  if (equityAvg <= -1.0 || (equityAvg <= -0.5 && goldUp)) {
-    return { label: 'BEARISH', color: 'red', description: 'Equities under pressure' };
+  if (equityAvg <= -0.8 || (equityAvg <= -0.4 && goldUp)) {
+    return { label: 'BEARISH', color: 'red', description: 'Broad selling — equities under pressure' };
   }
-  if (equityAvg <= -0.3) {
-    return { label: 'BEARISH', color: 'red', description: 'Mild selling — watch for continuation' };
+  if (equityAvg <= -0.15) {
+    return { label: 'BEARISH', color: 'red', description: 'Mild selling — watch for follow-through' };
   }
-  return { label: 'NEUTRAL', color: 'amber', description: 'Choppy — no clear directional signal' };
+  return { label: 'NEUTRAL', color: 'amber', description: 'No clear directional signal' };
 }
 
 // ---------------------------------------------------------------------------
