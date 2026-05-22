@@ -218,8 +218,16 @@ export default function Watchlist() {
 
   const visibleItems = useMemo(() => {
     if (!activeCategory) return [];
-    return groups[activeCategory] || [];
-  }, [groups, activeCategory]);
+    const items = groups[activeCategory] || [];
+    return [...items].sort((a, b) => {
+      const pctA = priceMap.get(a.ticker.toUpperCase())?.changePct ?? null;
+      const pctB = priceMap.get(b.ticker.toUpperCase())?.changePct ?? null;
+      if (pctA == null && pctB == null) return a.ticker.localeCompare(b.ticker);
+      if (pctA == null) return 1;
+      if (pctB == null) return -1;
+      return pctB - pctA;
+    });
+  }, [groups, activeCategory, priceMap]);
 
   const countFor = (cat) => (groups[cat] || []).length;
 
