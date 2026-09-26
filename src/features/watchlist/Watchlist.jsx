@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronUp,
   Search,
+  Radar,
 } from 'lucide-react';
 import { supabase, authReady } from '../../lib/supabase';
 import MarketBar from '../../components/MarketBar';
@@ -86,6 +87,26 @@ async function fetchPositionTickers() {
   return new Set((data || []).map((r) => r.ticker.toUpperCase()));
 }
 
+// Map<TICKER, [group names]> for tickers tracked on the Sector Pulse page.
+// Non-fatal: if pulse_groups doesn't exist yet, no tags are shown.
+async function fetchPulseMembership() {
+  try {
+    await authReady();
+    const { data, error } = await supabase.from('pulse_groups').select('name, tickers, is_benchmark');
+    if (error) return new Map();
+    const map = new Map();
+    for (const g of data || []) {
+      for (const t of g.tickers || []) {
+        const k = t.toUpperCase();
+        map.set(k, [...(map.get(k) || []), g.name]);
+      }
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
 // Fetch live prices via /api/quotes serverless function.
 // Returns Map<ticker, { price, changePct, prevClose }>
 // Price = (bid+ask)/2 mid. changePct = (price - prevClose) / prevClose * 100
@@ -129,13 +150,17 @@ export default function Watchlist() {
   const [search, setSearch] = useState('');
   const [priceMap, setPriceMap] = useState(new Map());
   const [pricesLoading, setPricesLoading] = useState(false);
+  const [pulseMap, setPulseMap] = useState(new Map());
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [wl, pos] = await Promise.all([fetchWatchlist(), fetchPositionTickers()]);
+      const [wl, pos, pulse] = await Promise.all([
+        fetchWatchlist(), fetchPositionTickers(), fetchPulseMembership(),
+      ]);
       setItems(wl);
       setPositionTickers(pos);
+      setPulseMap(pulse);
     } catch (e) {
       setError(e.message || 'Failed to load.');
     }
@@ -354,6 +379,7 @@ export default function Watchlist() {
                       <TickerRow
                         key={row.id}
                         row={row}
+                        pulseGroups={pulseMap.get(row.ticker.toUpperCase())}
                         inPositions={positionTickers.has(row.ticker.toUpperCase())}
                         showCategory
                         quote={priceMap.get(row.ticker.toUpperCase()) || null}
@@ -436,6 +462,7 @@ export default function Watchlist() {
                       <TickerRow
                         key={`${activeCategory}-${row.id}`}
                         row={row}
+                        pulseGroups={pulseMap.get(row.ticker.toUpperCase())}
                         inPositions={positionTickers.has(row.ticker.toUpperCase())}
                         showCategory={activeCategory === 'daily'}
                         quote={priceMap.get(row.ticker.toUpperCase()) || null}
@@ -493,7 +520,7 @@ function TickerTableHeader({ showCategory }) {
   );
 }
 
-function TickerRow({ row, inPositions, showCategory, quote, onEdit, onDelete }) {
+function TickerRow({ row, inPositions, pulseGroups, showCategory, quote, onEdit, onDelete }) {
   const [expanded, setExpanded] = useState(false);
   const longThesis = row.thesis && row.thesis.length > 80;
 
@@ -529,6 +556,16 @@ function TickerRow({ row, inPositions, showCategory, quote, onEdit, onDelete }) 
           </span>
           {row.in_daily_focus && (
             <span title="In weekly focus" className="text-base leading-none">🎯</span>
+          )}
+          {pulseGroups?.length > 0 && (
+            <Link
+              to="/sectors"
+              title={`Tracked on Sector Pulse: ${pulseGroups.join(', ')}`}
+              className="inline-flex items-center gap-1 rounded border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-300 hover:bg-sky-500/20"
+            >
+              <Radar className="h-2.5 w-2.5" strokeWidth={2} />
+              {pulseGroups.join(', ')}
+            </Link>
           )}
           {inPositions && (
             <span title="In positions" className="inline-flex items-center gap-0.5 rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-300">

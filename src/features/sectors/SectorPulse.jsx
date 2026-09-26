@@ -395,6 +395,28 @@ function GroupEditor({ onClose, onSaved }) {
   const [originalIds, setOriginalIds] = useState([]);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [categories, setCategories] = useState([]); // [{ name, tickers }]
+
+  // Watchlist categories, so a group can be filled from one in a click.
+  useEffect(() => {
+    (async () => {
+      try {
+        await authReady();
+        const { data, error: e } = await supabase
+          .from('watchlist').select('ticker, category').eq('is_active', true);
+        if (e) return;
+        const byCat = {};
+        for (const r of data || []) {
+          const c = (r.category || '').trim();
+          if (!c || !r.ticker) continue;
+          (byCat[c] ||= new Set()).add(r.ticker.toUpperCase());
+        }
+        setCategories(Object.entries(byCat)
+          .map(([name, set]) => ({ name, tickers: [...set].sort() }))
+          .sort((a, b) => a.name.localeCompare(b.name)));
+      } catch { /* picker just stays empty */ }
+    })();
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -428,6 +450,15 @@ function GroupEditor({ onClose, onSaved }) {
   });
   const remove = (i) => setRows((rs) => rs.filter((_, j) => j !== i));
   const add = () => setRows((rs) => [...rs, { id: null, name: '', text: '', is_benchmark: false }]);
+  const addFromCategory = (i, catName) => {
+    const cat = categories.find((c) => c.name === catName);
+    if (!cat) return;
+    setRows((rs) => rs.map((r, j) => {
+      if (j !== i) return r;
+      const merged = [...new Set([...parseTickers(r.text), ...cat.tickers])];
+      return { ...r, text: merged.join(', '), name: r.name || cat.name.replace(/(^|[-\s])\w/g, (m) => m.toUpperCase()) };
+    }));
+  };
 
   const cleaned = (rows || []).map((r, i) => ({
     id: r.id, name: r.name.trim(), tickers: parseTickers(r.text), is_benchmark: r.is_benchmark, sort_order: i,
@@ -522,13 +553,31 @@ function GroupEditor({ onClose, onSaved }) {
                 <button onClick={() => remove(i)} aria-label="Delete group" className="p-1 text-neutral-500 hover:text-rose-400"><Trash2 className="h-4 w-4" /></button>
               </div>
             </div>
-            <input
-              value={r.text}
-              onChange={(e) => update(i, { text: e.target.value })}
-              placeholder="AMD, NVDA, ARM"
-              aria-label="Tickers"
-              className="mt-2 w-full rounded border border-neutral-800 bg-transparent px-2 py-1.5 font-mono text-[12px] uppercase text-neutral-200 placeholder:normal-case placeholder:text-neutral-700 focus:border-emerald-500/50 focus:outline-none"
-            />
+            <div className="mt-2 flex flex-wrap gap-2">
+              <input
+                value={r.text}
+                onChange={(e) => update(i, { text: e.target.value })}
+                placeholder="AMD, NVDA, ARM"
+                aria-label="Tickers"
+                className="min-w-0 flex-1 rounded border border-neutral-800 bg-transparent px-2 py-1.5 font-mono text-[12px] uppercase text-neutral-200 placeholder:normal-case placeholder:text-neutral-700 focus:border-emerald-500/50 focus:outline-none"
+              />
+              {categories.length > 0 && (
+                <select
+                  value=""
+                  onChange={(e) => addFromCategory(i, e.target.value)}
+                  aria-label="Add tickers from a watchlist category"
+                  className="rounded border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-[12px] text-neutral-400 focus:border-emerald-500/50 focus:outline-none"
+                >
+                  <option value="">+ from watchlist…</option>
+                  {categories.map((c) => (
+                    <option key={c.name} value={c.name}>{c.name} ({c.tickers.length})</option>
+                  ))}
+                </select>
+              )}
+            </div>
+            {r.text && (
+              <div className="mt-1 text-[10px] text-neutral-600">{parseTickers(r.text).length} tickers</div>
+            )}
           </div>
         ))}
       </div>
