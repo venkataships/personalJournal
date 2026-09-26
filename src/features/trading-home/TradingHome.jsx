@@ -15,6 +15,7 @@ import {
   LineChart,
   ScrollText,
   Eye,
+  Radar,
 } from 'lucide-react';
 import { supabase, authReady } from '../../lib/supabase';
 import { usePortfolio } from '../../hooks/usePortfolio';
@@ -220,6 +221,23 @@ export default function TradingHome() {
             Open dashboard
             <ArrowRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" strokeWidth={2} />
           </div>
+        </Link>
+
+        {/* Sector pulse */}
+        <Link
+          to="/sectors"
+          className="group flex items-center justify-between rounded-md border border-neutral-800 bg-neutral-950/40 px-5 py-4 mb-8 hover:border-emerald-500/40 hover:bg-neutral-900/50 transition-all"
+        >
+          <div>
+            <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] text-emerald-400/80">
+              <Radar className="h-3 w-3" strokeWidth={2} />
+              Sector pulse
+            </div>
+            <div className="mt-1 text-[13px] text-neutral-400">
+              Leading sectors, rotation, and where money is flowing
+            </div>
+          </div>
+          <ArrowRight className="h-4 w-4 text-neutral-500 group-hover:text-emerald-400 group-hover:translate-x-0.5 transition-all" strokeWidth={2} />
         </Link>
 
         {/* Intention */}
