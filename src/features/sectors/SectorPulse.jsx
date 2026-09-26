@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft, AlertCircle, RefreshCw, TrendingUp, TrendingDown, Radar,
+  Pencil, Plus, Trash2, ChevronUp, ChevronDown, X, Check,
 } from 'lucide-react';
 import {
   ResponsiveContainer, ScatterChart, Scatter, XAxis, YAxis, ReferenceLine,
@@ -9,16 +10,17 @@ import {
 } from 'recharts';
 import { supabase, authReady } from '../../lib/supabase';
 
-// Written every 30 min by sector_pulse.py on the GCP bot → Supabase market_pulse.
-// This page only reads the latest row, so it loads instantly and costs nothing.
+// Groups live in Supabase `pulse_groups` (edited here). sector_pulse.py on the
+// bot reads them every run and writes a snapshot to `market_pulse`, which this
+// page and the /sectors Telegram command read. No Claude calls.
 
 // Validated for dark surface #0a0a0a (lightness band, contrast, CVD adjacent).
-// Quadrant is also encoded by chart position and a text label — never color alone.
+// Phase is always also shown as a text label — never color alone.
 const QUADRANT = {
-  Leading:   { color: '#059669', text: 'text-emerald-300', chip: 'border-emerald-500/40 bg-emerald-500/10', blurb: 'strong short & long term' },
+  Leading:   { color: '#059669', text: 'text-emerald-300', chip: 'border-emerald-500/40 bg-emerald-500/10', blurb: 'beating SPY short & long term' },
   Weakening: { color: '#d97706', text: 'text-amber-300',   chip: 'border-amber-500/40 bg-amber-500/10',     blurb: 'trend intact, momentum fading' },
   Improving: { color: '#0284c7', text: 'text-sky-300',     chip: 'border-sky-500/40 bg-sky-500/10',         blurb: 'money rotating in' },
-  Lagging:   { color: '#e11d48', text: 'text-rose-300',    chip: 'border-rose-500/40 bg-rose-500/10',       blurb: 'weak short & long term' },
+  Lagging:   { color: '#e11d48', text: 'text-rose-300',    chip: 'border-rose-500/40 bg-rose-500/10',       blurb: 'trailing SPY short & long term' },
 };
 
 const SESSION_LABEL = {
@@ -51,11 +53,19 @@ function ago(iso) {
   return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
 }
 
+function parseTickers(text) {
+  return [...new Set(
+    text.split(/[\s,]+/).map((t) => t.trim().toUpperCase().replace(/^\$/, '')).filter(Boolean),
+  )];
+}
+
 // ---------------------------------------------------------------------------
 
 export default function SectorPulse() {
   const [state, setState] = useState({ loading: true, error: null, row: null });
-  const [tab, setTab] = useState('themes');
+  const [editing, setEditing] = useState(false);
+  const [showMap, setShowMap] = useState(false);
+  const [savedNote, setSavedNote] = useState(false);
 
   const load = useCallback(async () => {
     setState((s) => ({ ...s, loading: true, error: null }));
@@ -81,14 +91,16 @@ export default function SectorPulse() {
   }, [load]);
 
   const row = state.row;
+  const groups = row?.groups || [];
+  const oldFormat = row && !groups.length && (row.sectors?.length || row.themes?.length);
   const stale = row && ['premarket', 'regular'].includes(row.session) && minutesAgo(row.as_of) > STALE_MIN;
-  const groups = row ? (tab === 'themes' ? row.themes : row.sectors) : [];
+  const missing = row?.coverage?.missing || [];
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-neutral-200 font-sans antialiased selection:bg-emerald-500/30">
-      <div className="relative mx-auto max-w-5xl px-4 py-8 sm:px-8 sm:py-12">
+      <div className="relative mx-auto max-w-4xl px-4 py-8 sm:px-8 sm:py-12">
         {/* Header */}
-        <header className="mb-8">
+        <header className="mb-6">
           <Link
             to="/trading"
             className="inline-flex items-center gap-1.5 mb-3 text-[11px] uppercase tracking-[0.22em] text-neutral-500 hover:text-emerald-400 transition-colors"
@@ -102,25 +114,21 @@ export default function SectorPulse() {
                 <Radar className="h-7 w-7 text-emerald-400" strokeWidth={1.5} />
                 Sector Pulse
               </h1>
-              <p className="mt-1 text-[13px] text-neutral-500">
-                Where money is moving — sectors, themes, and your watchlist groups.
-              </p>
+              <p className="mt-1 text-[13px] text-neutral-500">Your groups, ranked against SPY.</p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               {row && (
-                <div className="text-right font-mono text-[11px] text-neutral-500">
+                <div className="mr-1 text-right font-mono text-[11px] text-neutral-500">
                   <div className="uppercase tracking-[0.18em]">{SESSION_LABEL[row.session] || row.session}</div>
                   <div title={new Date(row.as_of).toLocaleString()}>updated {ago(row.as_of)}</div>
                 </div>
               )}
-              <button
-                onClick={load}
-                disabled={state.loading}
-                aria-label="Refresh"
-                className="rounded border border-neutral-800 p-2 text-neutral-400 hover:border-emerald-500/40 hover:text-emerald-400 disabled:opacity-50 transition-colors"
-              >
+              <IconButton label="Edit groups" onClick={() => setEditing((v) => !v)} active={editing}>
+                <Pencil className="h-4 w-4" strokeWidth={1.75} />
+              </IconButton>
+              <IconButton label="Refresh" onClick={load} disabled={state.loading}>
                 <RefreshCw className={`h-4 w-4 ${state.loading ? 'animate-spin' : ''}`} strokeWidth={1.75} />
-              </button>
+              </IconButton>
             </div>
           </div>
 
@@ -137,7 +145,26 @@ export default function SectorPulse() {
               server may be down. Check <span className="font-mono">journalctl -u portfolio-agent.service</span>.
             </Banner>
           )}
+          {oldFormat && (
+            <Banner tone="warn">
+              This snapshot is from before group tracking. It refreshes on the next update, or send
+              <span className="font-mono"> /sectors now</span> in Telegram.
+            </Banner>
+          )}
+          {savedNote && (
+            <Banner tone="ok">
+              Groups saved. They show here after the next update (every 30 min, 4am–8pm ET weekdays) —
+              or send <span className="font-mono">/sectors now</span> in Telegram to see them immediately.
+            </Banner>
+          )}
         </header>
+
+        {editing && (
+          <GroupEditor
+            onClose={() => setEditing(false)}
+            onSaved={() => { setEditing(false); setSavedNote(true); }}
+          />
+        )}
 
         {!state.loading && !state.error && !row && (
           <div className="rounded-md border border-dashed border-neutral-800 px-5 py-10 text-center text-sm text-neutral-500">
@@ -147,64 +174,62 @@ export default function SectorPulse() {
 
         {row && (
           <>
-            {/* Narrative + tape */}
-            <section className="mb-6 rounded-md border border-neutral-800 bg-neutral-950/40 px-5 py-5">
-              <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.22em] text-emerald-400/80">
-                Read of the tape
-                {row.risk?.tone && <RiskChip tone={row.risk.tone} />}
-              </div>
-              <p className="mt-3 text-[14px] leading-relaxed text-neutral-300">{row.narrative}</p>
-              <div className="mt-5 grid grid-cols-3 gap-3 border-t border-neutral-900 pt-4 sm:grid-cols-5">
-                {Object.entries(row.benchmarks || {}).map(([sym, b]) => (
-                  <div key={sym}>
-                    <div className="text-[10px] uppercase tracking-wider text-neutral-500">
-                      {sym} <span className="normal-case tracking-normal text-neutral-700">{b.name}</span>
+            {/* Index strip */}
+            {Object.keys(row.benchmarks || {}).length > 0 && (
+              <section className="mb-4 grid grid-cols-3 gap-2">
+                {Object.entries(row.benchmarks).map(([sym, b]) => (
+                  <div key={sym} className="rounded-md border border-neutral-800 bg-neutral-950/40 px-3 py-2.5">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="font-mono text-[12px] text-neutral-200">{sym}</span>
+                      <span className="hidden truncate text-[10px] text-neutral-600 sm:inline">{b.name}</span>
                     </div>
-                    <div className={`mt-1 font-mono text-[15px] tabular-nums ${pctClass(b.r1)}`}>{pct(b.r1, 2)}</div>
-                    <div className="font-mono text-[10px] tabular-nums text-neutral-600">5d {pct(b.r5)}</div>
+                    <div className={`mt-1 font-mono text-lg tabular-nums ${pctClass(b.r1)}`}>{pct(b.r1, 2)}</div>
+                    <div className="font-mono text-[10px] tabular-nums text-neutral-500">
+                      {b.price?.toFixed(2)} · 5d {pct(b.r5)}
+                    </div>
                   </div>
                 ))}
-              </div>
+              </section>
+            )}
+
+            {/* Narrative */}
+            {row.narrative && (
+              <section className="mb-6 rounded-md border border-neutral-800 bg-neutral-950/40 px-4 py-4">
+                <div className="text-[10px] uppercase tracking-[0.22em] text-emerald-400/80">Read of the tape</div>
+                <p className="mt-2 text-[14px] leading-relaxed text-neutral-300">{row.narrative}</p>
+              </section>
+            )}
+
+            {/* Groups */}
+            <section className="space-y-4">
+              {groups.map((g, i) => <GroupCard key={g.name} group={g} rank={i + 1} total={groups.length} />)}
             </section>
 
-            {/* Watchlist groups */}
-            <section className="mb-8">
-              <SectionTitle
-                title="Your watchlist groups"
-                hint="Ranked by heat (0–100, relative strength vs SPY over 1/5/20 days). Tap a group for leaders."
-              />
-              <CategoryGrid categories={row.categories || []} />
-            </section>
+            {missing.length > 0 && (
+              <p className="mt-3 text-[12px] text-neutral-600">
+                No price data for: <span className="font-mono">{missing.join(', ')}</span> — check the symbol.
+              </p>
+            )}
 
-            {/* Rotation map + table */}
-            <section className="mb-8">
-              <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-                <SectionTitle
-                  title="Rotation"
-                  hint="Right = beating SPY over 20 days. Up = beating SPY over 5 days."
-                  noMargin
-                />
-                <div role="tablist" className="flex rounded border border-neutral-800 p-0.5 text-[11px] uppercase tracking-[0.15em]">
-                  {[['themes', 'Themes'], ['sectors', 'Sectors']].map(([k, label]) => (
-                    <button
-                      key={k}
-                      role="tab"
-                      aria-selected={tab === k}
-                      onClick={() => setTab(k)}
-                      className={`rounded px-3 py-1.5 transition-colors ${
-                        tab === k ? 'bg-emerald-500/15 text-emerald-300' : 'text-neutral-500 hover:text-neutral-300'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <RotationMap rows={groups} />
-              <GroupTable rows={groups} />
-            </section>
+            {/* Rotation map (collapsed by default) */}
+            {groups.length > 0 && (
+              <section className="mt-8">
+                <button
+                  onClick={() => setShowMap((v) => !v)}
+                  aria-expanded={showMap}
+                  className="flex w-full items-center justify-between rounded-md border border-neutral-800 px-4 py-3 text-left hover:border-neutral-700"
+                >
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">Rotation map</div>
+                    <div className="mt-0.5 text-[12px] text-neutral-600">Every ticker by 5-day vs 20-day strength against SPY</div>
+                  </div>
+                  {showMap ? <ChevronUp className="h-4 w-4 text-neutral-500" /> : <ChevronDown className="h-4 w-4 text-neutral-500" />}
+                </button>
+                {showMap && <RotationMap groups={groups} />}
+              </section>
+            )}
 
-            <footer className="pt-2 text-center font-mono text-[10px] text-neutral-700">
+            <footer className="mt-8 text-center font-mono text-[10px] text-neutral-700">
               {row.coverage?.symbols_computed}/{row.coverage?.symbols_requested} symbols ·{' '}
               {row.coverage?.live_quotes ? `${row.coverage.live_quotes} live quotes · ` : ''}
               narrative: {row.narrative_source}
@@ -218,170 +243,332 @@ export default function SectorPulse() {
 
 // ---------------------------------------------------------------------------
 
+function IconButton({ label, onClick, disabled, active, children }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      className={`rounded border p-2 transition-colors disabled:opacity-50 ${
+        active
+          ? 'border-emerald-500/50 text-emerald-300'
+          : 'border-neutral-800 text-neutral-400 hover:border-emerald-500/40 hover:text-emerald-400'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
 function Banner({ tone, children }) {
-  const cls = tone === 'error'
-    ? 'border-rose-500/30 bg-rose-500/5 text-rose-300'
-    : 'border-amber-500/30 bg-amber-500/5 text-amber-200';
+  const cls = {
+    error: 'border-rose-500/30 bg-rose-500/5 text-rose-300',
+    warn: 'border-amber-500/30 bg-amber-500/5 text-amber-200',
+    ok: 'border-emerald-500/30 bg-emerald-500/5 text-emerald-200',
+  }[tone];
+  const Icon = tone === 'ok' ? Check : AlertCircle;
   return (
     <div className={`mt-4 flex items-start gap-2 rounded-md border px-3 py-2 text-[13px] ${cls}`}>
-      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.75} />
+      <Icon className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.75} />
       <span>{children}</span>
     </div>
   );
 }
 
-function SectionTitle({ title, hint, noMargin }) {
-  return (
-    <div className={noMargin ? '' : 'mb-3'}>
-      <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">{title}</div>
-      {hint && <div className="mt-0.5 text-[12px] text-neutral-600">{hint}</div>}
-    </div>
-  );
-}
-
-function RiskChip({ tone }) {
-  const map = {
-    'risk-on':  ['Risk-on', 'border-emerald-500/40 text-emerald-300', TrendingUp],
-    'risk-off': ['Risk-off', 'border-rose-500/40 text-rose-300', TrendingDown],
-    mixed:      ['Mixed', 'border-neutral-700 text-neutral-400', null],
-  };
-  const [label, cls, Icon] = map[tone] || map.mixed;
-  return (
-    <span className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 normal-case tracking-normal text-[11px] ${cls}`}>
-      {Icon && <Icon className="h-3 w-3" strokeWidth={2} />}
-      {label}
-    </span>
-  );
-}
-
-function QuadrantChip({ q }) {
+function QuadrantChip({ q, compact }) {
   if (!q) return <span className="text-neutral-700">—</span>;
   const s = QUADRANT[q];
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 text-[11px] ${s.chip} ${s.text}`}>
+    <span
+      title={`${q} — ${s.blurb}`}
+      className={`inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 text-[11px] ${s.chip} ${s.text}`}
+    >
       <span className="h-1.5 w-1.5 rounded-full" style={{ background: s.color }} />
-      {q}
+      {compact ? (
+        <>
+          <span className="sm:hidden">{q.slice(0, 4)}</span>
+          <span className="hidden sm:inline">{q}</span>
+        </>
+      ) : q}
     </span>
   );
 }
 
 function FlowTag({ flow, rvol }) {
-  if (!flow) return rvol ? <span className="font-mono text-neutral-600">{rvol}x</span> : <span className="text-neutral-700">—</span>;
+  if (!flow) return rvol >= 1.2 ? <span className="font-mono text-neutral-500">{rvol}x</span> : <span className="text-neutral-800">·</span>;
   const inflow = flow === 'inflow';
+  const Icon = inflow ? TrendingUp : TrendingDown;
   return (
     <span className={`inline-flex items-center gap-1 font-mono ${inflow ? 'text-emerald-400' : 'text-rose-400'}`}>
-      {inflow ? <TrendingUp className="h-3 w-3" strokeWidth={2} /> : <TrendingDown className="h-3 w-3" strokeWidth={2} />}
-      {rvol}x {inflow ? 'in' : 'out'}
+      <Icon className="h-3 w-3" strokeWidth={2} />
+      {rvol}x
     </span>
   );
 }
 
-function HeatBar({ heat }) {
-  if (heat === null || heat === undefined) return <span className="text-neutral-700">—</span>;
+function GroupCard({ group: g, rank, total }) {
+  const edge = rank === 1 ? 'Strongest' : rank === total && total > 1 ? 'Weakest' : null;
   return (
-    <div className="flex items-center gap-2">
-      <div className="h-1.5 w-14 overflow-hidden rounded-full bg-neutral-900" aria-hidden>
-        <div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.max(heat, 3)}%`, opacity: 0.35 + (heat / 100) * 0.65 }} />
-      </div>
-      <span className="w-6 font-mono tabular-nums text-neutral-300">{heat}</span>
-    </div>
-  );
-}
-
-// Diverging tile tint on today's move: rose ← neutral → emerald, capped at ±3%.
-function tileStyle(r1) {
-  if (r1 === null || r1 === undefined) return {};
-  const a = Math.min(Math.abs(r1) / 3, 1) * 0.22;
-  const rgb = r1 >= 0 ? '5,150,105' : '225,29,72';
-  return { background: `rgba(${rgb},${a})`, borderColor: `rgba(${rgb},${0.15 + a * 1.5})` };
-}
-
-function CategoryGrid({ categories }) {
-  const [open, setOpen] = useState(null);
-  if (!categories.length) {
-    return <div className="text-[13px] text-neutral-600">No categorised watchlist tickers.</div>;
-  }
-  return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-      {categories.map((c) => {
-        const isOpen = open === c.category;
-        return (
-          <button
-            key={c.category}
-            onClick={() => setOpen(isOpen ? null : c.category)}
-            aria-expanded={isOpen}
-            style={tileStyle(c.r1)}
-            className={`rounded-md border border-neutral-800 px-3 py-3 text-left transition-colors hover:border-neutral-600 ${
-              isOpen ? 'col-span-2 sm:col-span-3 lg:col-span-4' : ''
-            }`}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="text-[13px] font-medium capitalize text-neutral-100">{c.category}</div>
-              <div className="font-mono text-[11px] tabular-nums text-neutral-400" title="Heat (0–100)">{c.heat ?? '—'}</div>
+    <div className="overflow-hidden rounded-md border border-neutral-800 bg-neutral-950/40">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-neutral-900 px-4 py-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-[15px] font-medium text-neutral-100">{g.name}</h2>
+            <QuadrantChip q={g.quadrant} />
+            {edge && <span className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">{edge}</span>}
+          </div>
+          <div className="mt-1 font-mono text-[11px] tabular-nums text-neutral-500">
+            {g.up}/{g.count} green · vs SPY 5d <span className={pctClass(g.rs5)}>{pct(g.rs5)}</span>
+            {' '}· 20d <span className={pctClass(g.rs20)}>{pct(g.rs20)}</span>
+          </div>
+        </div>
+        <div className="flex gap-4 text-right font-mono tabular-nums">
+          {[['1d', g.r1, 2], ['5d', g.r5, 1], ['20d', g.r20, 1]].map(([label, v, d]) => (
+            <div key={label}>
+              <div className="text-[10px] uppercase tracking-wider text-neutral-600">{label}</div>
+              <div className={`${label === '1d' ? 'text-lg' : 'text-[13px] mt-1'} ${pctClass(v)}`}>{pct(v, d)}</div>
             </div>
-            <div className={`mt-1.5 font-mono text-lg tabular-nums ${pctClass(c.r1)}`}>{pct(c.r1)}</div>
-            <div className="mt-1 flex flex-wrap gap-x-3 font-mono text-[10px] tabular-nums text-neutral-500">
-              <span>5d {pct(c.r5)}</span>
-              <span>{c.breadth_up ?? '—'}% green</span>
-              <span>{c.count} names</span>
-            </div>
-            {!isOpen && c.leaders?.[0] && (
-              <div className="mt-2 truncate text-[11px] text-neutral-500">
-                top <span className="font-mono text-neutral-300">{c.leaders[0].ticker}</span>{' '}
-                <span className={`font-mono ${pctClass(c.leaders[0].r1)}`}>{pct(c.leaders[0].r1)}</span>
-              </div>
-            )}
-            {isOpen && (
-              <div className="mt-3 grid gap-4 border-t border-neutral-800/80 pt-3 sm:grid-cols-3">
-                <MemberList title="Leaders" items={c.leaders} />
-                <MemberList title="Laggards" items={c.laggards} />
-                <div className="space-y-1 text-[12px] text-neutral-400">
-                  <div className="text-[10px] uppercase tracking-wider text-neutral-500">Detail</div>
-                  <div className="flex items-center gap-2">Phase <QuadrantChip q={c.quadrant} /></div>
-                  <div>vs SPY: <span className={`font-mono ${pctClass(c.rs5)}`}>{pct(c.rs5)}</span> 5d · <span className={`font-mono ${pctClass(c.rs20)}`}>{pct(c.rs20)}</span> 20d</div>
-                  <div>{c.pct_above_ema20 ?? '—'}% above 20 EMA</div>
-                  {(c.inflows > 0 || c.outflows > 0) && (
-                    <div>Heavy volume: <span className="text-emerald-400">{c.inflows} up</span> · <span className="text-rose-400">{c.outflows} down</span></div>
-                  )}
-                  {c.missing?.length > 0 && <div className="text-neutral-600">No data: {c.missing.join(', ')}</div>}
-                </div>
-              </div>
-            )}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function MemberList({ title, items }) {
-  return (
-    <div>
-      <div className="mb-1 text-[10px] uppercase tracking-wider text-neutral-500">{title}</div>
-      {items?.length ? (
-        <ul className="space-y-0.5">
-          {items.map((m) => (
-            <li key={m.ticker} className="flex justify-between gap-3 font-mono text-[12px] tabular-nums">
-              <span className="text-neutral-200">{m.ticker}</span>
-              <span className={pctClass(m.r1)}>{pct(m.r1)}</span>
-            </li>
           ))}
-        </ul>
-      ) : <div className="text-[12px] text-neutral-600">—</div>}
+        </div>
+      </div>
+
+      {g.count === 0 ? (
+        <div className="px-4 py-3 text-[12px] text-neutral-600">No price data for any ticker in this group.</div>
+      ) : (
+        <div>
+          <table className="w-full table-fixed text-[12px]">
+            <colgroup>
+              <col className="w-[20%] sm:w-[12%]" />
+              <col className="w-[22%] sm:w-[13%]" />
+              <col className="w-[19%] sm:w-[12%]" />
+              <col className="w-[17%] sm:w-[11%]" />
+              <col className="hidden sm:table-column sm:w-[11%]" />
+              <col className="hidden sm:table-column sm:w-[13%]" />
+              <col className="w-[22%] sm:w-[17%]" />
+              <col className="hidden sm:table-column sm:w-[11%]" />
+            </colgroup>
+            <thead>
+              <tr className="text-left text-[10px] uppercase tracking-wider text-neutral-600">
+                <th className="pl-4 pr-2 py-2 font-normal">Ticker</th>
+                <th className="px-2 py-2 text-right font-normal">Price</th>
+                <th className="px-2 py-2 text-right font-normal">1d</th>
+                <th className="px-2 py-2 text-right font-normal">5d</th>
+                <th className="hidden sm:table-cell px-2 py-2 text-right font-normal">20d</th>
+                <th className="hidden sm:table-cell px-2 py-2 text-right font-normal" title="5-day return minus SPY's">vs SPY 5d</th>
+                <th className="pl-3 pr-2 py-2 font-normal">Phase</th>
+                <th className="hidden sm:table-cell pr-4 py-2 font-normal" title="Volume vs 20-day average">Vol</th>
+              </tr>
+            </thead>
+            <tbody>
+              {g.members.map((m) => (
+                <tr key={m.ticker} className="border-t border-neutral-900 hover:bg-neutral-900/40">
+                  <td className="pl-4 pr-2 py-2 font-mono font-medium text-neutral-100">{m.ticker}</td>
+                  <td className="px-2 py-2 text-right font-mono tabular-nums text-neutral-300">{m.price?.toFixed(2)}</td>
+                  <td className={`px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.r1)}`}>{pct(m.r1, 2)}</td>
+                  <td className={`px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.r5)}`}>{pct(m.r5)}</td>
+                  <td className={`hidden sm:table-cell px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.r20)}`}>{pct(m.r20)}</td>
+                  <td className={`hidden sm:table-cell px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.rs5)}`}>{pct(m.rs5)}</td>
+                  <td className="pl-3 pr-2 py-2"><QuadrantChip q={m.quadrant} compact /></td>
+                  <td className="hidden sm:table-cell pr-4 py-2"><FlowTag flow={m.flow} rvol={m.rvol} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {g.missing?.length > 0 && g.count > 0 && (
+        <div className="border-t border-neutral-900 px-4 py-2 text-[11px] text-neutral-600">
+          No data: <span className="font-mono">{g.missing.join(', ')}</span>
+        </div>
+      )}
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Group editor — reads/writes Supabase pulse_groups
+// ---------------------------------------------------------------------------
+
+function GroupEditor({ onClose, onSaved }) {
+  const [rows, setRows] = useState(null);
+  const [originalIds, setOriginalIds] = useState([]);
+  const [error, setError] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        await authReady();
+        const { data, error: e } = await supabase
+          .from('pulse_groups')
+          .select('id, name, tickers, is_benchmark, sort_order')
+          .order('sort_order');
+        if (e) throw e;
+        setRows((data || []).map((r) => ({ ...r, text: r.tickers.join(', ') })));
+        setOriginalIds((data || []).map((r) => r.id));
+      } catch (e) {
+        setError(
+          (e.message || '').includes('pulse_groups')
+            ? 'The pulse_groups table doesn’t exist yet — run migrations/002_pulse_groups.sql in Supabase.'
+            : e.message || 'Failed to load groups.',
+        );
+        setRows([]);
+      }
+    })();
+  }, []);
+
+  const update = (i, patch) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const move = (i, d) => setRows((rs) => {
+    const j = i + d;
+    if (j < 0 || j >= rs.length) return rs;
+    const next = [...rs];
+    [next[i], next[j]] = [next[j], next[i]];
+    return next;
+  });
+  const remove = (i) => setRows((rs) => rs.filter((_, j) => j !== i));
+  const add = () => setRows((rs) => [...rs, { id: null, name: '', text: '', is_benchmark: false }]);
+
+  const cleaned = (rows || []).map((r, i) => ({
+    id: r.id, name: r.name.trim(), tickers: parseTickers(r.text), is_benchmark: r.is_benchmark, sort_order: i,
+  }));
+  const names = cleaned.map((r) => r.name.toLowerCase());
+  const problems = [
+    cleaned.some((r) => !r.name) && 'Every group needs a name.',
+    cleaned.some((r) => !r.tickers.length) && 'Every group needs at least one ticker.',
+    names.some((n, i) => n && names.indexOf(n) !== i) && 'Group names must be unique.',
+  ].filter(Boolean);
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      await authReady();
+      const keep = new Set(cleaned.filter((r) => r.id).map((r) => r.id));
+      const toDelete = originalIds.filter((id) => !keep.has(id));
+      if (toDelete.length) {
+        const { error: e } = await supabase.from('pulse_groups').delete().in('id', toDelete);
+        if (e) throw e;
+      }
+      // Two passes on existing rows so renames that swap names don't hit the unique constraint.
+      const existing = cleaned.filter((r) => r.id);
+      for (const r of existing) {
+        const { error: e } = await supabase.from('pulse_groups').update({ name: `__tmp_${r.id}` }).eq('id', r.id);
+        if (e) throw e;
+      }
+      for (const r of existing) {
+        const { error: e } = await supabase.from('pulse_groups').update({
+          name: r.name, tickers: r.tickers, is_benchmark: r.is_benchmark,
+          sort_order: r.sort_order, updated_at: new Date().toISOString(),
+        }).eq('id', r.id);
+        if (e) throw e;
+      }
+      const fresh = cleaned.filter((r) => !r.id).map((r) => ({
+        name: r.name, tickers: r.tickers, is_benchmark: r.is_benchmark, sort_order: r.sort_order,
+      }));
+      if (fresh.length) {
+        const { error: e } = await supabase.from('pulse_groups').insert(fresh);
+        if (e) throw e;
+      }
+      onSaved();
+    } catch (e) {
+      setError(e.message || 'Save failed.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="mb-6 rounded-md border border-emerald-500/30 bg-neutral-950/60 px-4 py-4">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[11px] uppercase tracking-[0.22em] text-emerald-300">Edit groups</div>
+          <div className="mt-0.5 text-[12px] text-neutral-500">
+            Tickers separated by commas or spaces. Mark a group as <em>index strip</em> to show it as the
+            row of index tiles at the top instead of a ranked card.
+          </div>
+        </div>
+        <button onClick={onClose} aria-label="Close editor" className="text-neutral-500 hover:text-neutral-200">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      {error && <Banner tone="error">{error}</Banner>}
+      {rows === null && <div className="py-4 text-[13px] text-neutral-500">Loading…</div>}
+
+      <div className="mt-2 space-y-2">
+        {(rows || []).map((r, i) => (
+          <div key={r.id ?? `new-${i}`} className="rounded border border-neutral-800 bg-neutral-950/60 p-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                value={r.name}
+                onChange={(e) => update(i, { name: e.target.value })}
+                placeholder="Group name"
+                aria-label="Group name"
+                className="min-w-0 flex-1 rounded border border-neutral-800 bg-transparent px-2 py-1.5 text-[13px] text-neutral-100 placeholder:text-neutral-700 focus:border-emerald-500/50 focus:outline-none"
+              />
+              <label className="flex items-center gap-1.5 text-[11px] text-neutral-400">
+                <input
+                  type="checkbox"
+                  checked={r.is_benchmark}
+                  onChange={(e) => update(i, { is_benchmark: e.target.checked })}
+                  className="accent-emerald-500"
+                />
+                index strip
+              </label>
+              <div className="flex items-center">
+                <button onClick={() => move(i, -1)} disabled={i === 0} aria-label="Move up" className="p-1 text-neutral-500 hover:text-neutral-200 disabled:opacity-30"><ChevronUp className="h-4 w-4" /></button>
+                <button onClick={() => move(i, 1)} disabled={i === rows.length - 1} aria-label="Move down" className="p-1 text-neutral-500 hover:text-neutral-200 disabled:opacity-30"><ChevronDown className="h-4 w-4" /></button>
+                <button onClick={() => remove(i)} aria-label="Delete group" className="p-1 text-neutral-500 hover:text-rose-400"><Trash2 className="h-4 w-4" /></button>
+              </div>
+            </div>
+            <input
+              value={r.text}
+              onChange={(e) => update(i, { text: e.target.value })}
+              placeholder="AMD, NVDA, ARM"
+              aria-label="Tickers"
+              className="mt-2 w-full rounded border border-neutral-800 bg-transparent px-2 py-1.5 font-mono text-[12px] uppercase text-neutral-200 placeholder:normal-case placeholder:text-neutral-700 focus:border-emerald-500/50 focus:outline-none"
+            />
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+        <button
+          onClick={add}
+          className="inline-flex items-center gap-1.5 rounded border border-dashed border-neutral-700 px-3 py-1.5 text-[12px] text-neutral-400 hover:border-emerald-500/50 hover:text-emerald-300"
+        >
+          <Plus className="h-3.5 w-3.5" /> Add group
+        </button>
+        <div className="flex items-center gap-3">
+          {problems.length > 0 && <span className="text-[12px] text-amber-300">{problems[0]}</span>}
+          <button
+            onClick={save}
+            disabled={saving || rows === null || problems.length > 0}
+            className="rounded border border-emerald-500/50 bg-emerald-500/10 px-4 py-1.5 text-[12px] font-medium uppercase tracking-[0.12em] text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-40"
+          >
+            {saving ? 'Saving…' : 'Save groups'}
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Rotation map
+// ---------------------------------------------------------------------------
 
 function RotationTooltip({ active, payload }) {
   if (!active || !payload?.length) return null;
   const d = payload[0].payload;
   return (
     <div className="rounded border border-neutral-700 bg-neutral-950 px-3 py-2 text-[12px] shadow-xl">
-      <div className="font-medium text-neutral-100">{d.symbol} <span className="text-neutral-500">{d.name}</span></div>
+      <div className="font-medium text-neutral-100">{d.ticker} <span className="text-neutral-500">{d.group}</span></div>
       <div className="mt-1 font-mono tabular-nums text-neutral-400">
         vs SPY 5d <span className={pctClass(d.rs5)}>{pct(d.rs5)}</span> · 20d <span className={pctClass(d.rs20)}>{pct(d.rs20)}</span>
       </div>
-      <div className="font-mono tabular-nums text-neutral-400">today <span className={pctClass(d.r1)}>{pct(d.r1, 2)}</span> · heat {d.heat}</div>
+      <div className="font-mono tabular-nums text-neutral-400">today <span className={pctClass(d.r1)}>{pct(d.r1, 2)}</span></div>
       {d.quadrant && <div className="mt-1 text-neutral-500">{d.quadrant} — {QUADRANT[d.quadrant].blurb}</div>}
     </div>
   );
@@ -394,36 +581,36 @@ function Dot({ cx, cy, payload }) {
     <g>
       <circle cx={cx} cy={cy} r={5} fill={color} stroke="#0a0a0a" strokeWidth={2} />
       <text x={cx + 8} y={cy + 3.5} fontSize={10} fill="#a3a3a3" fontFamily="ui-monospace, monospace">
-        {payload.symbol}
+        {payload.ticker}
       </text>
     </g>
   );
 }
 
-function RotationMap({ rows }) {
-  const data = useMemo(() => rows.filter((r) => r.rs5 != null && r.rs20 != null), [rows]);
-  const bound = (key) => {
-    const m = Math.max(1, ...data.map((d) => Math.abs(d[key])));
-    return Math.ceil(m * 1.15);
-  };
+function RotationMap({ groups }) {
+  const data = useMemo(() => {
+    const seen = new Set();
+    return groups.flatMap((g) => g.members.map((m) => ({ ...m, group: g.name })))
+      .filter((m) => m.rs5 != null && m.rs20 != null && !seen.has(m.ticker) && seen.add(m.ticker));
+  }, [groups]);
+  if (!data.length) return null;
+  const bound = (key) => Math.ceil(Math.max(1, ...data.map((d) => Math.abs(d[key]))) * 1.15);
   const bx = bound('rs20');
   const by = bound('rs5');
   const ticks = (b) => {
     const h = Math.round(b / 2);
     return h > 0 && h < b ? [-b, -h, 0, h, b] : [-b, 0, b];
   };
-  if (!data.length) return null;
-
   const corner = 'pointer-events-none absolute text-[10px] uppercase tracking-[0.18em]';
   return (
-    <div className="relative mb-4 rounded-md border border-neutral-800 bg-neutral-950/40 px-1 py-2">
+    <div className="relative mt-2 rounded-md border border-neutral-800 bg-neutral-950/40 px-1 py-2">
       <span className={`${corner} right-8 top-3 ${QUADRANT.Leading.text}`}>Leading</span>
       <span className={`${corner} left-14 top-3 ${QUADRANT.Improving.text}`}>Improving</span>
       <span className={`${corner} right-8 bottom-16 ${QUADRANT.Weakening.text}`}>Weakening</span>
       <span className={`${corner} left-14 bottom-16 ${QUADRANT.Lagging.text}`}>Lagging</span>
-      <ResponsiveContainer width="100%" height={340}>
+      <ResponsiveContainer width="100%" height={320}>
         <ScatterChart margin={{ top: 16, right: 28, bottom: 8, left: 0 }}>
-          <CartesianGrid stroke="#1f1f1f" strokeDasharray="0" />
+          <CartesianGrid stroke="#1f1f1f" />
           <XAxis
             type="number" dataKey="rs20" domain={[-bx, bx]} ticks={ticks(bx)} tickFormatter={(v) => `${v > 0 ? '+' : ''}${v}`}
             stroke="#525252" tick={{ fontSize: 10, fill: '#737373' }} tickLine={false}
@@ -441,44 +628,6 @@ function RotationMap({ rows }) {
           <Scatter data={data} shape={<Dot />} isAnimationActive={false} />
         </ScatterChart>
       </ResponsiveContainer>
-    </div>
-  );
-}
-
-function GroupTable({ rows }) {
-  return (
-    <div className="overflow-x-auto rounded-md border border-neutral-800">
-      <table className="w-full min-w-[640px] text-[12px]">
-        <thead>
-          <tr className="border-b border-neutral-800 text-left text-[10px] uppercase tracking-wider text-neutral-500">
-            <th className="px-3 py-2 font-normal">ETF</th>
-            <th className="px-3 py-2 font-normal">Heat</th>
-            <th className="px-3 py-2 text-right font-normal">1d</th>
-            <th className="px-3 py-2 text-right font-normal">5d</th>
-            <th className="px-3 py-2 text-right font-normal">20d</th>
-            <th className="px-3 py-2 font-normal">Phase</th>
-            <th className="px-3 py-2 font-normal">Volume</th>
-            <th className="px-3 py-2 text-right font-normal">vs 20 EMA</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.symbol} className="border-b border-neutral-900 last:border-0 hover:bg-neutral-900/40">
-              <td className="px-3 py-2">
-                <span className="font-mono text-neutral-100">{r.symbol}</span>{' '}
-                <span className="text-neutral-500">{r.name}</span>
-              </td>
-              <td className="px-3 py-2"><HeatBar heat={r.heat} /></td>
-              <td className={`px-3 py-2 text-right font-mono tabular-nums ${pctClass(r.r1)}`}>{pct(r.r1, 2)}</td>
-              <td className={`px-3 py-2 text-right font-mono tabular-nums ${pctClass(r.r5)}`}>{pct(r.r5)}</td>
-              <td className={`px-3 py-2 text-right font-mono tabular-nums ${pctClass(r.r20)}`}>{pct(r.r20)}</td>
-              <td className="px-3 py-2"><QuadrantChip q={r.quadrant} /></td>
-              <td className="px-3 py-2"><FlowTag flow={r.flow} rvol={r.rvol} /></td>
-              <td className={`px-3 py-2 text-right font-mono tabular-nums ${pctClass(r.dist_ema20)}`}>{pct(r.dist_ema20)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }
