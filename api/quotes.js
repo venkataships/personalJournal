@@ -1,7 +1,18 @@
 // api/quotes.js — Vercel serverless function
-// Price = (bid+ask)/2 mid from Public API
-// Change % = (mid - prevClose) / prevClose * 100
-// prevClose from Yahoo Finance — mirrors yfinance logic exactly
+//
+// All numbers come from Public's quote response. No Yahoo.
+//
+//   prevClose  = Public previousClose (the last completed regular session)
+//   Pre-market : price = (bid+ask)/2 mid, changePct vs prevClose
+//   Regular    : price = last trade (mid fallback), changePct vs prevClose
+//   After 4pm / weekends / overnight:
+//                price = today's regular close = prevClose + oneDayChange.change
+//                changePct = oneDayChange.percentChange (what the Public app shows)
+//                extPrice = last print (after-hours / 24h session), for reference
+//
+// Why not Yahoo: Yahoo posts the day's daily bar late, so "second-to-last
+// bar" silently became the day before yesterday. And after the close Public's
+// bid/ask/last belong to its overnight session, not the day's close.
 
 const BASE = 'https://api.public.com';
 
@@ -22,77 +33,56 @@ async function getAccessToken(secret) {
   return _cachedToken;
 }
 
-function isNYSEOpen(now = new Date()) {
-  const year = now.getUTCFullYear();
-  const edtStart = new Date(Date.UTC(year, 2, 1));
-  let suns = 0;
-  while (suns < 2) {
-    if (edtStart.getUTCDay() === 0) suns++;
-    if (suns < 2) edtStart.setUTCDate(edtStart.getUTCDate() + 1);
-  }
-  edtStart.setUTCHours(7, 0, 0, 0);
-  const estStart = new Date(Date.UTC(year, 10, 1));
-  while (estStart.getUTCDay() !== 0) estStart.setUTCDate(estStart.getUTCDate() + 1);
-  estStart.setUTCHours(6, 0, 0, 0);
-  const etOffset = (now >= edtStart && now < estStart) ? -4 : -5;
-  const etHour   = now.getUTCHours() + etOffset + now.getUTCMinutes() / 60;
-  const etDay    = (now.getUTCDay() + (now.getUTCHours() + etOffset < 0 ? -1 : 0) + 7) % 7;
-  if (etDay === 0 || etDay === 6) return false;
-  return etHour >= 9.5 && etHour < 16;
+// premarket | regular | closed  (closed = after 4pm, overnight, weekends)
+export function marketSession(now = new Date()) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: 'numeric', hour12: false,
+    }).formatToParts(now).map((p) => [p.type, p.value]),
+  );
+  if (parts.weekday === 'Sat' || parts.weekday === 'Sun') return 'closed';
+  const mins = (Number(parts.hour) % 24) * 60 + Number(parts.minute);
+  if (mins >= 4 * 60 && mins < 9 * 60 + 30) return 'premarket';
+  if (mins >= 9 * 60 + 30 && mins < 16 * 60) return 'regular';
+  return 'closed';
 }
 
-// True only before 9:30 AM ET on a weekday — today's Yahoo bar doesn't exist yet
-function isBeforeMarketOpen(now = new Date()) {
-  const year = now.getUTCFullYear();
-  const edtStart = new Date(Date.UTC(year, 2, 1));
-  let suns = 0;
-  while (suns < 2) {
-    if (edtStart.getUTCDay() === 0) suns++;
-    if (suns < 2) edtStart.setUTCDate(edtStart.getUTCDate() + 1);
+const num = (v) => {
+  const n = parseFloat(v);
+  return Number.isFinite(n) && n !== 0 ? n : null;
+};
+const round = (n, d = 2) => (n == null ? null : parseFloat(n.toFixed(d)));
+
+export function buildQuote(q, session) {
+  const bid  = num(q.bid);
+  const ask  = num(q.ask);
+  const last = num(q.last);
+  const mid  = bid && ask ? round((bid + ask) / 2) : null;
+  const prevClose = num(q.previousClose);
+  const day = q.oneDayChange || {};
+  const dayChange = Number.isFinite(parseFloat(day.change)) ? parseFloat(day.change) : null;
+  const dayPct    = Number.isFinite(parseFloat(day.percentChange)) ? parseFloat(day.percentChange) : null;
+
+  let price;
+  let changePct;
+  let extPrice = null;
+
+  if (session === 'closed' && prevClose && dayChange != null) {
+    price     = round(prevClose + dayChange);
+    changePct = dayPct != null ? round(dayPct) : round(dayChange / prevClose * 100);
+    extPrice  = last;
+  } else {
+    price = session === 'premarket' ? (mid ?? last) : (last ?? mid);
+    changePct = price && prevClose ? round((price - prevClose) / prevClose * 100) : null;
   }
-  edtStart.setUTCHours(7, 0, 0, 0);
-  const estStart = new Date(Date.UTC(year, 10, 1));
-  while (estStart.getUTCDay() !== 0) estStart.setUTCDate(estStart.getUTCDate() + 1);
-  estStart.setUTCHours(6, 0, 0, 0);
-  const etOffset = (now >= edtStart && now < estStart) ? -4 : -5;
+  if (!price) return null;
 
-  // Convert UTC time to ET — handle midnight crossover by working in total minutes
-  const utcMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
-  const etMinutes  = utcMinutes + etOffset * 60;
-  const etHour     = ((etMinutes % 1440) + 1440) % 1440 / 60; // normalize to 0-24
-
-  // Adjust weekday for ET midnight crossover
-  const utcDay = now.getUTCDay();
-  const etDay  = ((utcDay + (etMinutes < 0 ? -1 : 0)) + 7) % 7;
-
-  if (etDay === 0 || etDay === 6) return true;  // weekend — no today bar
-  return etHour < 9.5;                          // before open — no today bar yet
-}
-
-// Mirrors: yf.download(ticker, period='5d', interval='1d')['Close'].iloc[-2]
-// Pre-market (before 9:30 AM ET): today's bar doesn't exist yet → prev close = last bar = yesterday
-// Market hours + after hours (9:30 AM+ ET): today's bar exists → prev close = second-to-last = yesterday
-async function fetchPrevClose(ticker, marketOpen) {
-  try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=5d&interval=1d&includePrePost=false`;
-    const resp = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible)' } });
-    if (!resp.ok) return null;
-    const json = await resp.json();
-    const closes = json?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? [];
-    const valid = closes.filter((c) => c != null && Number.isFinite(c));
-    if (!valid.length) return null;
-
-    // Determine if today's bar exists in Yahoo's data yet.
-    // Today's bar appears once the market opens (9:30 AM ET) or sometimes slightly after.
-    // Pre-market: no today bar → take last (= yesterday)
-    // Market hours / after hours: today bar exists → take second-to-last (= yesterday)
-    const isPreMarket = isBeforeMarketOpen();
-    return isPreMarket
-      ? valid[valid.length - 1]                                                        // yesterday
-      : (valid.length >= 2 ? valid[valid.length - 2] : valid[valid.length - 1]);      // yesterday
-  } catch {
-    return null;
-  }
+  return {
+    price, changePct, prevClose, extPrice, session,
+    mid, last, bid, ask,
+    volume: q.volume ?? null,
+    timestamp: q.lastTimestamp ?? null,
+  };
 }
 
 export default async function handler(req, res) {
@@ -105,20 +95,16 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'PUBLIC_API_SECRET or PUBLIC_ACCOUNT_ID not configured' });
   }
 
-  const tickers    = [...new Set(symbols.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean))];
-  const marketOpen = isNYSEOpen();
+  const tickers = [...new Set(symbols.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean))];
+  const session = marketSession();
 
   try {
     const token = await getAccessToken(secret);
-
-    const pubResp = await fetch(
-      `${BASE}/userapigateway/marketdata/${accountId}/quotes`,
-      {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instruments: tickers.map((s) => ({ symbol: s, type: 'EQUITY' })) }),
-      }
-    );
+    const pubResp = await fetch(`${BASE}/userapigateway/marketdata/${accountId}/quotes`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instruments: tickers.map((s) => ({ symbol: s, type: 'EQUITY' })) }),
+    });
     if (!pubResp.ok) {
       if (pubResp.status === 401) _cachedToken = null;
       const txt = await pubResp.text();
@@ -126,37 +112,18 @@ export default async function handler(req, res) {
     }
     const quotes = (await pubResp.json())?.quotes ?? [];
 
-    // Fetch all prev closes in parallel — same as yfinance batch
-    const prevCloses = Object.fromEntries(
-      await Promise.all(tickers.map(async (t) => [t, await fetchPrevClose(t)]))
-    );
-
     const result = {};
     for (const q of quotes) {
       if (q.outcome !== 'SUCCESS') continue;
       const sym = q.instrument?.symbol?.toUpperCase();
       if (!sym) continue;
-
-      const bid  = parseFloat(q.bid)  || null;
-      const ask  = parseFloat(q.ask)  || null;
-      const last = parseFloat(q.last) || null;
-      const mid  = (bid && ask) ? parseFloat(((bid + ask) / 2).toFixed(2)) : null;
-      const price = mid ?? last;
-      if (!price) continue;
-
-      const prevClose = prevCloses[sym] ?? null;
-      const changePct = (prevClose && prevClose > 0)
-        ? parseFloat(((price - prevClose) / prevClose * 100).toFixed(2))
-        : null;
-
-      result[sym] = { price, changePct, prevClose, mid, last, bid, ask,
-        volume: q.volume ?? null, timestamp: q.lastTimestamp ?? null };
+      const built = buildQuote(q, session);
+      if (built) result[sym] = built;
     }
 
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=30');
     return res.status(200).json(result);
-
   } catch (e) {
     return res.status(502).json({ error: e.message ?? 'Failed' });
   }
