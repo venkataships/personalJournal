@@ -21,6 +21,7 @@ const QUADRANT = {
   Weakening: { color: '#d97706', text: 'text-amber-300',   chip: 'border-amber-500/40 bg-amber-500/10',     blurb: 'trend intact, momentum fading' },
   Improving: { color: '#0284c7', text: 'text-sky-300',     chip: 'border-sky-500/40 bg-sky-500/10',         blurb: 'money rotating in' },
   Lagging:   { color: '#e11d48', text: 'text-rose-300',    chip: 'border-rose-500/40 bg-rose-500/10',       blurb: 'trailing SPY short & long term' },
+  'In line': { color: '#737373', text: 'text-neutral-300', chip: 'border-neutral-700 bg-neutral-800/40',    blurb: 'within ±0.5 pts (5d) and ±1 pt (20d) of SPY — no clear direction' },
 };
 
 const SESSION_LABEL = {
@@ -276,12 +277,12 @@ function Banner({ tone, children }) {
   );
 }
 
-function QuadrantChip({ q, compact }) {
+function QuadrantChip({ q, compact, note }) {
   if (!q) return <span className="text-neutral-700">—</span>;
-  const s = QUADRANT[q];
+  const s = QUADRANT[q] || QUADRANT['In line'];
   return (
     <span
-      title={`${q} — ${s.blurb}`}
+      title={`${q} — ${s.blurb}${note ? ` (${note})` : ''}`}
       className={`inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 text-[11px] ${s.chip} ${s.text}`}
     >
       <span className="h-1.5 w-1.5 rounded-full" style={{ background: s.color }} />
@@ -291,6 +292,7 @@ function QuadrantChip({ q, compact }) {
           <span className="hidden sm:inline">{q}</span>
         </>
       ) : q}
+      {note && <span aria-hidden className="opacity-60">*</span>}
     </span>
   );
 }
@@ -315,7 +317,7 @@ function GroupCard({ group: g, rank, total }) {
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-[15px] font-medium text-neutral-100">{g.name}</h2>
-            <QuadrantChip q={g.quadrant} />
+            <QuadrantChip q={g.quadrant} note={g.phase_note} />
             {edge && <span className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">{edge}</span>}
           </div>
           <div className="mt-1 font-mono text-[11px] tabular-nums text-neutral-500">
@@ -387,7 +389,7 @@ function GroupCard({ group: g, rank, total }) {
                   <td className={`hidden sm:table-cell px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.r20)}`}>{pct(m.r20)}</td>
                   <td className={`hidden sm:table-cell px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.rs5)}`}>{pct(m.rs5)}</td>
                   <td className="pl-3 pr-2 py-2"><PdCell m={m} /></td>
-                  <td className="pl-2 pr-2 py-2"><QuadrantChip q={m.quadrant} compact /></td>
+                  <td className="pl-2 pr-2 py-2"><QuadrantChip q={m.quadrant} compact note={m.phase_note} /></td>
                   <td className="hidden sm:table-cell pr-4 py-2"><FlowTag flow={m.flow} rvol={m.rvol} /></td>
                 </tr>
               ))}
@@ -422,11 +424,12 @@ const PD_STATE = {
 function PdChip({ m }) {
   const e = PD_EVENT[m.pd_event] || PD_STATE[m.pd_state];
   if (!e) return <span className="text-neutral-700">—</span>;
-  const tip = `${e.tip ? e.tip + '. ' : ''}PDH ${m.pdh} (${pct(m.dist_pdh)}) · PDL ${m.pdl} (${pct(m.dist_pdl)})`
+  const tip = (m.pd_live ? 'Live — provisional until the close. ' : '')
+    + `${e.tip ? e.tip + '. ' : ''}PDH ${m.pdh} (${pct(m.dist_pdh)}) · PDL ${m.pdl} (${pct(m.dist_pdl)})`
     + (m.pd_vol_confirmed ? ` · on ${m.rvol}x volume` : '')
     + (m.hh_hl_streak ? ` · ${Math.abs(m.hh_hl_streak)} day${Math.abs(m.hh_hl_streak) > 1 ? 's' : ''} of ${m.hh_hl_streak > 0 ? 'higher highs & lows' : 'lower highs & lows'}` : '');
   return (
-    <span title={tip} className={`inline-flex items-center gap-1 whitespace-nowrap rounded border px-1.5 py-0.5 text-[11px] ${e.cls}`}>
+    <span title={tip} className={`inline-flex items-center gap-1 whitespace-nowrap rounded border px-1.5 py-0.5 text-[11px] ${e.cls} ${m.pd_live ? 'border-dashed' : ''}`}>
       <span aria-hidden>{e.icon}</span>
       <span className="sm:hidden">{e.short}</span>
       <span className="hidden sm:inline">{e.label}</span>
@@ -482,7 +485,7 @@ function SectorStrip({ g }) {
           <span className={pctClass(r.r1)}>{pct(r.r1, 2)}</span> 1d · <span className={pctClass(r.r5)}>{pct(r.r5)}</span> 5d
           {' '}· <span className={pctClass(r.r20)}>{pct(r.r20)}</span> 20d
         </span>
-        <QuadrantChip q={r.quadrant} />
+        <QuadrantChip q={r.quadrant} note={r.phase_note} />
         {r.pd_state && <PdChip m={r} />}
         {r.above_ema20 != null && (
           <span className="text-neutral-500">{r.above_ema20 ? 'above' : 'below'} 20-day avg</span>
