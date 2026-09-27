@@ -146,6 +146,12 @@ export default function SectorPulse() {
               server may be down. Check <span className="font-mono">journalctl -u portfolio-agent.service</span>.
             </Banner>
           )}
+          {['rate_limited', 'stale'].includes(row?.coverage?.history?.status) && (
+            <Banner tone="warn">
+              Price history: {row.coverage.history.note}. Levels and returns may lag until Yahoo responds again;
+              live prices from Public are still current.
+            </Banner>
+          )}
           {oldFormat && (
             <Banner tone="warn">
               This snapshot is from before group tracking. It refreshes on the next update, or send
@@ -237,6 +243,8 @@ export default function SectorPulse() {
               {row.coverage?.symbols_computed}/{row.coverage?.symbols_requested} symbols ·{' '}
               {row.coverage?.live_quotes ? `${row.coverage.live_quotes} live quotes · ` : ''}
               narrative: {row.narrative_source}
+              {row.coverage?.history?.base_date && <> · history {row.coverage.history.base_date}
+                {' '}({row.coverage.history.status})</>}
             </footer>
           </>
         )}
