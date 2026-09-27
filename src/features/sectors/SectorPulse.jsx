@@ -321,6 +321,10 @@ function GroupCard({ group: g, rank, total }) {
           <div className="mt-1 font-mono text-[11px] tabular-nums text-neutral-500">
             {g.up}/{g.count} green
             {g.ema_known > 0 && <> · {g.above_ema20}/{g.ema_known} above 20-day avg</>}
+            {(g.above_pdh > 0 || g.below_pdl > 0) && (
+              <> · <span className="text-emerald-400">{g.above_pdh} above PDH</span>
+                {' '}/ <span className="text-rose-400">{g.below_pdl} below PDL</span></>
+            )}
             {' '}· vs SPY 5d <span className={pctClass(g.rs5)}>{pct(g.rs5)}</span>
             {' '}· 20d <span className={pctClass(g.rs20)}>{pct(g.rs20)}</span>
           </div>
@@ -350,24 +354,26 @@ function GroupCard({ group: g, rank, total }) {
         <div>
           <table className="w-full table-fixed text-[12px]">
             <colgroup>
-              <col className="w-[20%] sm:w-[12%]" />
-              <col className="w-[22%] sm:w-[13%]" />
-              <col className="w-[19%] sm:w-[12%]" />
-              <col className="w-[17%] sm:w-[11%]" />
-              <col className="hidden sm:table-column sm:w-[11%]" />
-              <col className="hidden sm:table-column sm:w-[13%]" />
-              <col className="w-[22%] sm:w-[17%]" />
-              <col className="hidden sm:table-column sm:w-[11%]" />
+              <col className="w-[17%] sm:w-[9%]" />
+              <col className="w-[19%] sm:w-[10%]" />
+              <col className="w-[17%] sm:w-[9%]" />
+              <col className="hidden sm:table-column sm:w-[8%]" />
+              <col className="hidden sm:table-column sm:w-[8%]" />
+              <col className="hidden sm:table-column sm:w-[9%]" />
+              <col className="w-[25%] sm:w-[22%]" />
+              <col className="w-[22%] sm:w-[15%]" />
+              <col className="hidden sm:table-column sm:w-[8%]" />
             </colgroup>
             <thead>
               <tr className="text-left text-[10px] uppercase tracking-wider text-neutral-600">
                 <th className="pl-4 pr-2 py-2 font-normal">Ticker</th>
                 <th className="px-2 py-2 text-right font-normal">Price</th>
                 <th className="px-2 py-2 text-right font-normal">1d</th>
-                <th className="px-2 py-2 text-right font-normal">5d</th>
+                <th className="hidden sm:table-cell px-2 py-2 text-right font-normal">5d</th>
                 <th className="hidden sm:table-cell px-2 py-2 text-right font-normal">20d</th>
                 <th className="hidden sm:table-cell px-2 py-2 text-right font-normal" title="5-day return minus SPY's">vs SPY 5d</th>
-                <th className="pl-3 pr-2 py-2 font-normal">Phase</th>
+                <th className="pl-3 pr-2 py-2 font-normal" title="Price vs the previous day's high (PDH) and low (PDL)">vs PDH/PDL</th>
+                <th className="pl-2 pr-2 py-2 font-normal">Phase</th>
                 <th className="hidden sm:table-cell pr-4 py-2 font-normal" title="Volume vs 20-day average">Vol</th>
               </tr>
             </thead>
@@ -377,10 +383,11 @@ function GroupCard({ group: g, rank, total }) {
                   <td className="pl-4 pr-2 py-2 font-mono font-medium text-neutral-100">{m.ticker}</td>
                   <td className="px-2 py-2 text-right font-mono tabular-nums text-neutral-300">{m.price?.toFixed(2)}</td>
                   <td className={`px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.r1)}`}>{pct(m.r1, 2)}</td>
-                  <td className={`px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.r5)}`}>{pct(m.r5)}</td>
+                  <td className={`hidden sm:table-cell px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.r5)}`}>{pct(m.r5)}</td>
                   <td className={`hidden sm:table-cell px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.r20)}`}>{pct(m.r20)}</td>
                   <td className={`hidden sm:table-cell px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.rs5)}`}>{pct(m.rs5)}</td>
-                  <td className="pl-3 pr-2 py-2"><QuadrantChip q={m.quadrant} compact /></td>
+                  <td className="pl-3 pr-2 py-2"><PdCell m={m} /></td>
+                  <td className="pl-2 pr-2 py-2"><QuadrantChip q={m.quadrant} compact /></td>
                   <td className="hidden sm:table-cell pr-4 py-2"><FlowTag flow={m.flow} rvol={m.rvol} /></td>
                 </tr>
               ))}
@@ -392,6 +399,68 @@ function GroupCard({ group: g, rank, total }) {
         <div className="border-t border-neutral-900 px-4 py-2 text-[11px] text-neutral-600">
           No data: <span className="font-mono">{g.missing.join(', ')}</span>
         </div>
+      )}
+    </div>
+  );
+}
+
+// Previous-day high/low. Color is always paired with a text label.
+const PD_EVENT = {
+  breakout:        { label: 'Breakout', short: 'Breakout',    icon: '↑', cls: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300', tip: 'Traded above yesterday’s high and holding above it' },
+  breakdown:       { label: 'Breakdown', short: 'Brk dn',   icon: '↓', cls: 'border-rose-500/40 bg-rose-500/10 text-rose-300',          tip: 'Traded below yesterday’s low and holding below it' },
+  failed_breakout: { label: 'Failed BO', short: 'Failed',   icon: '✗', cls: 'border-amber-500/40 bg-amber-500/10 text-amber-300',       tip: 'Poked above yesterday’s high, now back below it' },
+  reclaim:         { label: 'Reclaim', short: 'Reclaim',     icon: '↺', cls: 'border-sky-500/40 bg-sky-500/10 text-sky-300',             tip: 'Broke yesterday’s low, now back above it' },
+  outside_day:     { label: 'Outside day', short: 'Outside', icon: '⇕', cls: 'border-neutral-700 text-neutral-300',                       tip: 'Took out both yesterday’s high and low' },
+  inside_day:      { label: 'Inside day', short: 'Inside',  icon: '▭', cls: 'border-neutral-700 text-neutral-400',                       tip: 'Today’s range is inside yesterday’s — coiling' },
+};
+const PD_STATE = {
+  above:  { label: 'Above PDH', short: 'Above', icon: '↑', cls: 'border-emerald-500/30 text-emerald-300' },
+  below:  { label: 'Below PDL', short: 'Below', icon: '↓', cls: 'border-rose-500/30 text-rose-300' },
+  inside: { label: 'Inside',     short: 'Inside', icon: '·', cls: 'border-neutral-800 text-neutral-500' },
+};
+
+function PdChip({ m }) {
+  const e = PD_EVENT[m.pd_event] || PD_STATE[m.pd_state];
+  if (!e) return <span className="text-neutral-700">—</span>;
+  const tip = `${e.tip ? e.tip + '. ' : ''}PDH ${m.pdh} (${pct(m.dist_pdh)}) · PDL ${m.pdl} (${pct(m.dist_pdl)})`
+    + (m.pd_vol_confirmed ? ` · on ${m.rvol}x volume` : '')
+    + (m.hh_hl_streak ? ` · ${Math.abs(m.hh_hl_streak)} day${Math.abs(m.hh_hl_streak) > 1 ? 's' : ''} of ${m.hh_hl_streak > 0 ? 'higher highs & lows' : 'lower highs & lows'}` : '');
+  return (
+    <span title={tip} className={`inline-flex items-center gap-1 whitespace-nowrap rounded border px-1.5 py-0.5 text-[11px] ${e.cls}`}>
+      <span aria-hidden>{e.icon}</span>
+      <span className="sm:hidden">{e.short}</span>
+      <span className="hidden sm:inline">{e.label}</span>
+      {m.pd_vol_confirmed && <span className="font-mono text-[10px] opacity-80">vol</span>}
+    </span>
+  );
+}
+
+// Mini range: PDL tick at 20%, PDH tick at 80%, dot = current price (clamped).
+function PdBar({ m }) {
+  if (m.pd_pos == null) return null;
+  const x = 20 + Math.max(-30, Math.min(130, m.pd_pos)) * 0.6;
+  const dot = m.pd_state === 'above' ? '#059669' : m.pd_state === 'below' ? '#e11d48' : '#a3a3a3';
+  return (
+    <svg width="64" height="12" viewBox="0 0 100 12" aria-hidden className="shrink-0">
+      <line x1="20" y1="6" x2="80" y2="6" stroke="#404040" strokeWidth="2" />
+      <line x1="20" y1="2" x2="20" y2="10" stroke="#737373" strokeWidth="1.5" />
+      <line x1="80" y1="2" x2="80" y2="10" stroke="#737373" strokeWidth="1.5" />
+      <circle cx={Math.max(4, Math.min(96, x))} cy="6" r="4" fill={dot} stroke="#0a0a0a" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+function PdCell({ m }) {
+  if (!m.pd_state) return <span className="text-neutral-700">—</span>;
+  return (
+    <div className="flex items-center gap-2">
+      <span className="hidden sm:inline-flex"><PdBar m={m} /></span>
+      <PdChip m={m} />
+      {m.hh_hl_streak >= 2 && (
+        <span className="hidden sm:inline font-mono text-[10px] text-emerald-500" title={`${m.hh_hl_streak} days of higher highs & higher lows`}>↗{m.hh_hl_streak}d</span>
+      )}
+      {m.hh_hl_streak <= -2 && (
+        <span className="hidden sm:inline font-mono text-[10px] text-rose-500" title={`${-m.hh_hl_streak} days of lower highs & lower lows`}>↘{-m.hh_hl_streak}d</span>
       )}
     </div>
   );
@@ -414,6 +483,7 @@ function SectorStrip({ g }) {
           {' '}· <span className={pctClass(r.r20)}>{pct(r.r20)}</span> 20d
         </span>
         <QuadrantChip q={r.quadrant} />
+        {r.pd_state && <PdChip m={r} />}
         {r.above_ema20 != null && (
           <span className="text-neutral-500">{r.above_ema20 ? 'above' : 'below'} 20-day avg</span>
         )}
