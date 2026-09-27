@@ -573,7 +573,117 @@ function TopSetups({ setups, inTrade }) {
           {picks.map((p, i) => <SetupCard key={p.ticker} p={p} rank={i + 1} inTrade={inTrade?.has(p.ticker)} />)}
         </div>
       )}
+      {setups.all?.length > 0 && <QualifiedTable rows={setups.all} inTrade={inTrade} />}
     </section>
+  );
+}
+
+// Every ticker that passed the hard filters, not just the top 5.
+const QUAL_COLS = [
+  { key: 'rank',     label: '#',          title: 'Rank by score' },
+  { key: 'ticker',   label: 'Ticker' },
+  { key: 'source',   label: 'Group',      title: 'Pulse group or watchlist category' },
+  { key: 'score',    label: 'Score',      num: true, title: 'Setup score out of 100' },
+  { key: 'price',    label: 'Price',      num: true },
+  { key: 'r1',       label: '1D',         num: true },
+  { key: 'rs5',      label: 'vs SPY 5d',  num: true, title: 'Points ahead of SPY over 5 days' },
+  { key: 'rvol',     label: 'Vol',        num: true, title: 'Volume vs 20-day average' },
+  { key: 'dist_pdh', label: 'Above PDH',  num: true, title: 'How far above yesterday\'s high — smaller is a closer entry' },
+  { key: 'quadrant', label: 'Phase' },
+  { key: 'sector',   label: 'Sector ETF' },
+];
+
+function QualifiedTable({ rows, inTrade }) {
+  const [open, setOpen] = useState(false);
+  const [sort, setSort] = useState({ key: 'rank', dir: 1 });
+  const ranked = rows.map((r, i) => ({ ...r, rank: i + 1 }));
+
+  // Where the breakouts cluster — the "broader sense" at a glance.
+  const byGroup = Object.entries(
+    ranked.reduce((m, r) => ({ ...m, [r.source || 'other']: (m[r.source || 'other'] || 0) + 1 }), {}),
+  ).sort((a, b) => b[1] - a[1]);
+
+  const sorted = [...ranked].sort((a, b) => {
+    const av = a[sort.key], bv = b[sort.key];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * sort.dir;
+  });
+  const onSort = (c) => {
+    if (c.key === 'sector') return;
+    setSort((s) => (s.key === c.key ? { key: c.key, dir: -s.dir } : { key: c.key, dir: c.num ? -1 : 1 }));
+  };
+
+  return (
+    <div className="mt-3 rounded-md border border-neutral-800 bg-neutral-950/40">
+      <button type="button" onClick={() => setOpen((o) => !o)}
+        className="flex w-full flex-wrap items-center justify-between gap-2 px-3 py-2 text-left">
+        <span className="text-[12px] text-neutral-300">
+          {open ? 'Hide' : 'Show'} all {rows.length} qualified
+        </span>
+        <span className="flex flex-wrap gap-1.5 text-[11px] text-neutral-500">
+          {byGroup.map(([g, n]) => (
+            <span key={g} className="rounded border border-neutral-800 px-1.5 py-0.5 capitalize">
+              {g} <span className="font-mono text-neutral-300">{n}</span>
+            </span>
+          ))}
+        </span>
+      </button>
+      {open && (
+        <div className="overflow-x-auto border-t border-neutral-900">
+          <table className="w-full min-w-[720px] text-[12px]">
+            <thead>
+              <tr className="text-[10px] uppercase tracking-wider text-neutral-500">
+                {QUAL_COLS.map((c) => (
+                  <th key={c.key} title={c.title} onClick={() => onSort(c)}
+                    className={`px-2 py-1.5 font-normal ${c.num ? 'text-right' : 'text-left'} ${c.key !== 'sector' ? 'cursor-pointer select-none hover:text-neutral-300' : ''}`}>
+                    {c.label}{sort.key === c.key ? (sort.dir > 0 ? ' ↑' : ' ↓') : ''}
+                  </th>
+                ))}
+                <th className="px-2 py-1.5" />
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((r) => (
+                <tr key={r.ticker} className={`border-t border-neutral-900 ${r.rank <= 5 ? 'bg-emerald-500/[0.04]' : ''}`}
+                  title={r.cautions?.length ? `! ${r.cautions.join(' · ')}` : undefined}>
+                  <td className="px-2 py-1.5 font-mono text-neutral-600">{r.rank}</td>
+                  <td className="whitespace-nowrap px-2 py-1.5 font-mono font-semibold text-neutral-100">
+                    {r.ticker}{r.pd_live && <span className="ml-1 text-neutral-600" title="Live — provisional until the close">~</span>}
+                    {inTrade?.has(r.ticker) && <InTradeTag />}
+                    {r.cautions?.length > 0 && <span className="ml-1 font-sans text-amber-300/80">!</span>}
+                  </td>
+                  <td className="max-w-[120px] truncate px-2 py-1.5 capitalize text-neutral-400">{r.source}</td>
+                  <td className="px-2 py-1.5 text-right font-mono tabular-nums text-neutral-100">{r.score}</td>
+                  <td className="px-2 py-1.5 text-right font-mono tabular-nums text-neutral-300">{r.price?.toFixed(2) ?? '—'}</td>
+                  <td className={`px-2 py-1.5 text-right font-mono tabular-nums ${pctClass(r.r1)}`}>{pct(r.r1, 2)}</td>
+                  <td className={`px-2 py-1.5 text-right font-mono tabular-nums ${pctClass(r.rs5)}`}>
+                    {r.rs5 == null ? '—' : `${r.rs5 > 0 ? '+' : ''}${r.rs5.toFixed(1)}`}
+                  </td>
+                  <td className={`px-2 py-1.5 text-right font-mono tabular-nums ${(r.rvol || 0) >= 1.3 ? 'text-emerald-400' : 'text-neutral-500'}`}>
+                    {r.rvol != null ? `${r.rvol}x` : '—'}
+                  </td>
+                  <td className={`px-2 py-1.5 text-right font-mono tabular-nums ${(r.dist_pdh || 0) > 4 ? 'text-amber-300' : 'text-neutral-300'}`}>
+                    {r.dist_pdh != null ? `${r.dist_pdh.toFixed(1)}%` : '—'}
+                  </td>
+                  <td className="px-2 py-1.5"><QuadrantChip q={r.quadrant} compact /></td>
+                  <td className="whitespace-nowrap px-2 py-1.5 text-neutral-400">
+                    {r.sector_etf ? <>{r.sector_etf} <span className={QUADRANT[r.sector_phase]?.text || 'text-neutral-600'}>{r.sector_phase || ''}</span></> : '—'}
+                  </td>
+                  <td className="px-2 py-1.5 text-right">
+                    <Link to={logLink(r)} className="text-[10px] uppercase tracking-wider text-neutral-500 hover:text-emerald-300">Log</Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="border-t border-neutral-900 px-3 py-1.5 text-[11px] text-neutral-600">
+            Tinted rows are the top 5 above · ! has cautions (hover the row) · ~ provisional until the close · click a header to sort
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
