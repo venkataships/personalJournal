@@ -193,6 +193,9 @@ export default function SectorPulse() {
               </section>
             )}
 
+            {/* Top setups */}
+            {row.setups && <TopSetups setups={row.setups} />}
+
             {/* Narrative */}
             {row.narrative && (
               <section className="mb-6 rounded-md border border-neutral-800 bg-neutral-950/40 px-4 py-4">
@@ -497,6 +500,93 @@ function SectorStrip({ g }) {
           <span className={pctClass(vs.r5)}>{vs.r5 > 0 ? '+' : ''}{vs.r5?.toFixed(1)} pts</span> 5d
           {vs.r20 != null && <> · <span className={pctClass(vs.r20)}>{vs.r20 > 0 ? '+' : ''}{vs.r20.toFixed(1)} pts</span> 20d</>}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Top setups — rule-based PDH breakout scan (see sector_pulse.score_setup)
+// ---------------------------------------------------------------------------
+
+const POINT_LABELS = {
+  volume: ['Volume', 25], strength: ['5d vs SPY', 20], sector: ['Sector', 15],
+  trend: ['HH/HL streak', 15], entry: ['Near PDH', 15], extension: ['Not extended', 10],
+};
+
+const SETUP_RULES =
+  'Must: holding above yesterday\'s high · Leading/Improving vs SPY · above 20-day avg · sector ETF not Lagging. '
+  + 'Score: volume 25, 5d strength 20, sector 15, higher-highs streak 15, close to PDH 15, not extended 10.';
+
+function TopSetups({ setups }) {
+  const picks = setups.picks || [];
+  return (
+    <section className="mb-6">
+      <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-400" title={SETUP_RULES}>
+            Top setups <span className="normal-case tracking-normal text-neutral-600">ⓘ</span>
+          </div>
+          <div className="mt-0.5 text-[12px] text-neutral-600">
+            {picks.length} shown · {setups.qualified} qualified of {setups.scanned} scanned (watchlist + groups)
+          </div>
+        </div>
+        <div className="text-[11px] text-amber-300/80">Setups to watch, not buy signals — size per your limits.</div>
+      </div>
+      {picks.length === 0 ? (
+        <div className="rounded-md border border-dashed border-neutral-800 px-4 py-5 text-center text-[13px] text-neutral-500">
+          No clean breakouts right now. Nothing qualifies — that’s an answer too.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
+          {picks.map((p, i) => <SetupCard key={p.ticker} p={p} rank={i + 1} />)}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SetupCard({ p, rank }) {
+  const breakdown = Object.entries(p.points || {})
+    .map(([k, v]) => `${POINT_LABELS[k]?.[0] ?? k}: ${v}/${POINT_LABELS[k]?.[1] ?? '?'}`).join(' · ');
+  return (
+    <div className={`flex flex-col rounded-md border bg-neutral-950/50 px-3 py-3 ${p.pd_live ? 'border-dashed border-neutral-700' : 'border-neutral-800'}`}
+      title={p.pd_live ? 'Live — provisional until the close' : undefined}>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <div className="flex items-baseline gap-1.5">
+            <span className="font-mono text-[10px] text-neutral-600">#{rank}</span>
+            <span className="font-mono text-[15px] font-semibold text-neutral-100">{p.ticker}</span>
+          </div>
+          <div className="mt-0.5 truncate text-[11px] capitalize text-neutral-500">
+            {p.source}{p.sector_etf ? ` · ${p.sector_etf}` : ''}
+          </div>
+        </div>
+        <div className="text-right" title={breakdown}>
+          <div className="font-mono text-lg tabular-nums text-neutral-100">{p.score}</div>
+          <div className="text-[9px] uppercase tracking-wider text-neutral-600">/ 100</div>
+        </div>
+      </div>
+      <div className="mt-2 h-1 overflow-hidden rounded-full bg-neutral-900" aria-hidden>
+        <div className="h-full rounded-full bg-emerald-500" style={{ width: `${p.score}%` }} />
+      </div>
+      <div className="mt-2 flex items-baseline justify-between font-mono text-[12px] tabular-nums">
+        <span className="text-neutral-300">{p.price?.toFixed(2)}</span>
+        <span className={pctClass(p.r1)}>{pct(p.r1, 2)}</span>
+      </div>
+      <div className="mt-1 text-[11px] text-neutral-400">
+        Invalid below <span className="font-mono text-neutral-200">{p.invalid_below}</span>
+        <span className="text-neutral-600"> (PDH)</span>
+      </div>
+      {p.reasons?.length > 0 && (
+        <ul className="mt-2 space-y-0.5 text-[11px] text-emerald-300/90">
+          {p.reasons.slice(0, 3).map((r) => <li key={r}>+ {r}</li>)}
+        </ul>
+      )}
+      {p.cautions?.length > 0 && (
+        <ul className="mt-1 space-y-0.5 text-[11px] text-amber-300/90">
+          {p.cautions.map((c) => <li key={c}>! {c}</li>)}
+        </ul>
       )}
     </div>
   );
