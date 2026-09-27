@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft, AlertCircle, RefreshCw, TrendingUp, TrendingDown, Radar,
-  Pencil, Plus, Trash2, ChevronUp, ChevronDown, X, Check,
+  Pencil, Plus, Trash2, ChevronUp, ChevronDown, X, Check, BookText,
 } from 'lucide-react';
 import {
   ResponsiveContainer, ScatterChart, Scatter, XAxis, YAxis, ReferenceLine,
@@ -82,7 +82,10 @@ export default function SectorPulse() {
         .limit(1)
         .maybeSingle();
       if (error) throw error;
-      setState({ loading: false, error: null, row: data });
+      // Tickers with an open journal trade get an "In trade" tag (non-fatal).
+      const openRes = await supabase.from('trade_journal').select('ticker').eq('status', 'open');
+      const inTrade = new Set((openRes.data || []).map((t) => (t.ticker || '').toUpperCase()));
+      setState({ loading: false, error: null, row: data, inTrade });
     } catch (e) {
       setState((s) => ({ ...s, loading: false, error: e.message || 'Failed to load.' }));
     }
@@ -127,6 +130,10 @@ export default function SectorPulse() {
                   <div title={new Date(row.as_of).toLocaleString()}>updated {ago(row.as_of)}</div>
                 </div>
               )}
+              <Link to="/journal" title="Journal"
+                className="rounded border border-neutral-800 p-2 text-neutral-400 hover:border-emerald-500/40 hover:text-emerald-400">
+                <BookText className="h-4 w-4" strokeWidth={1.75} />
+              </Link>
               <IconButton label="Edit groups" onClick={() => setEditing((v) => !v)} active={editing}>
                 <Pencil className="h-4 w-4" strokeWidth={1.75} />
               </IconButton>
@@ -206,11 +213,11 @@ export default function SectorPulse() {
             )}
 
             {/* Top setups */}
-            {row.setups && <TopSetups setups={row.setups} />}
+            {row.setups && <TopSetups setups={row.setups} inTrade={state.inTrade} />}
 
             {/* Groups */}
             <section className="space-y-4">
-              {groups.map((g, i) => <GroupCard key={g.name} group={g} rank={i + 1} total={groups.length} />)}
+              {groups.map((g, i) => <GroupCard key={g.name} group={g} rank={i + 1} total={groups.length} inTrade={state.inTrade} />)}
             </section>
 
             {missing.length > 0 && (
@@ -318,7 +325,23 @@ function FlowTag({ flow, rvol }) {
   );
 }
 
-function GroupCard({ group: g, rank, total }) {
+function InTradeTag() {
+  return (
+    <Link to="/journal" title="You have an open journal trade in this ticker"
+      className="ml-1.5 rounded border border-sky-500/40 bg-sky-500/10 px-1 py-0.5 align-middle font-sans text-[9px] font-normal uppercase tracking-wider text-sky-300">
+      In trade
+    </Link>
+  );
+}
+
+function logLink(p) {
+  const q = new URLSearchParams({ ticker: p.ticker, setup: 'top_setup' });
+  if (p.price != null) q.set('price', String(p.price));
+  if (p.invalid_below != null) q.set('stop', String(p.invalid_below));
+  return `/journal?${q.toString()}`;
+}
+
+function GroupCard({ group: g, rank, total, inTrade }) {
   const edge = rank === 1 ? 'Strongest' : rank === total && total > 1 ? 'Weakest' : null;
   return (
     <div className="overflow-hidden rounded-md border border-neutral-800 bg-neutral-950/40">
@@ -391,7 +414,9 @@ function GroupCard({ group: g, rank, total }) {
             <tbody>
               {g.members.map((m) => (
                 <tr key={m.ticker} className="border-t border-neutral-900 hover:bg-neutral-900/40">
-                  <td className="pl-4 pr-2 py-2 font-mono font-medium text-neutral-100">{m.ticker}</td>
+                  <td className="pl-4 pr-2 py-2 font-mono font-medium text-neutral-100">
+                    {m.ticker}{inTrade?.has(m.ticker) && <span className="hidden sm:inline"><InTradeTag /></span>}
+                  </td>
                   <td className="px-2 py-2 text-right font-mono tabular-nums text-neutral-300">{m.price?.toFixed(2)}</td>
                   <td className={`px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.r1)}`}>{pct(m.r1, 2)}</td>
                   <td className={`hidden sm:table-cell px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.r5)}`}>{pct(m.r5)}</td>
@@ -524,7 +549,7 @@ const SETUP_RULES =
   'Must: holding above yesterday\'s high · Leading/Improving vs SPY · above 20-day avg · sector ETF not Lagging. '
   + 'Score: volume 25, 5d strength 20, sector 15, higher-highs streak 15, close to PDH 15, not extended 10.';
 
-function TopSetups({ setups }) {
+function TopSetups({ setups, inTrade }) {
   const picks = setups.picks || [];
   return (
     <section className="mb-6">
@@ -545,14 +570,14 @@ function TopSetups({ setups }) {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
-          {picks.map((p, i) => <SetupCard key={p.ticker} p={p} rank={i + 1} />)}
+          {picks.map((p, i) => <SetupCard key={p.ticker} p={p} rank={i + 1} inTrade={inTrade?.has(p.ticker)} />)}
         </div>
       )}
     </section>
   );
 }
 
-function SetupCard({ p, rank }) {
+function SetupCard({ p, rank, inTrade }) {
   const breakdown = Object.entries(p.points || {})
     .map(([k, v]) => `${POINT_LABELS[k]?.[0] ?? k}: ${v}/${POINT_LABELS[k]?.[1] ?? '?'}`).join(' · ');
   return (
@@ -563,6 +588,7 @@ function SetupCard({ p, rank }) {
           <div className="flex items-baseline gap-1.5">
             <span className="font-mono text-[10px] text-neutral-600">#{rank}</span>
             <span className="font-mono text-[15px] font-semibold text-neutral-100">{p.ticker}</span>
+            {inTrade && <InTradeTag />}
           </div>
           <div className="mt-0.5 truncate text-[11px] capitalize text-neutral-500">
             {p.source}{p.sector_etf ? ` · ${p.sector_etf}` : ''}
@@ -594,6 +620,10 @@ function SetupCard({ p, rank }) {
           {p.cautions.map((c) => <li key={c}>! {c}</li>)}
         </ul>
       )}
+      <Link to={logLink(p)}
+        className="mt-auto pt-3 text-center text-[11px] uppercase tracking-[0.14em] text-neutral-500 hover:text-emerald-300">
+        <span className="block rounded border border-neutral-800 py-1.5 hover:border-emerald-500/40">Log trade</span>
+      </Link>
     </div>
   );
 }

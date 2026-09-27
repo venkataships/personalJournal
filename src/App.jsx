@@ -4,7 +4,7 @@ import TradingHome from './features/trading-home/TradingHome';
 import LifeHome from './features/life-home/LifeHome';
 import DailyDashboard from './features/dashboard/DailyDashboard';
 import TomorrowPrep from './features/tomorrow-prep/TomorrowPrep';
-import TradeJournalEntry from './features/trade-journal/TradeJournalEntry';
+import Journal from './features/journal/Journal';
 import LifeJournal from './features/life-journal/LifeJournal';
 import Positions from './features/positions/Positions';
 import Watchlist from './features/watchlist/Watchlist';
@@ -20,7 +20,8 @@ export default function App() {
         <Route path="/life"           element={<LifeHome />} />
         <Route path="/dashboard"      element={<DailyDashboard />} />
         <Route path="/tomorrow-prep"  element={<TomorrowPrep />} />
-        <Route path="/trade-journal"  element={<TradeJournalEntry />} />
+        <Route path="/journal"        element={<Journal />} />
+        <Route path="/trade-journal"  element={<Navigate to="/journal" replace />} />
         <Route path="/life-journal"   element={<LifeJournal />} />
         <Route path="/positions"      element={<Positions />} />
         <Route path="/watchlist"      element={<Watchlist />} />

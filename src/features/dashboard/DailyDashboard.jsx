@@ -569,7 +569,7 @@ export default function DailyDashboard() {
           <span className="hidden sm:inline">Discipline compounds.</span>
           <div className="flex items-center gap-4 ml-auto">
             <Link
-              to="/trade-journal"
+              to="/journal"
               className="inline-flex items-center gap-1.5 text-neutral-500 hover:text-emerald-400 transition-colors"
             >
               Log trade →

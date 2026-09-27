@@ -271,7 +271,7 @@ export default function TradingHome() {
         {/* Quick action */}
         <section className="mb-12">
           <Link
-            to="/trade-journal"
+            to="/journal"
             className="group flex items-center justify-center gap-2 w-full rounded-md border border-emerald-500/40 bg-emerald-500/10 px-5 py-4 text-[13px] font-medium uppercase tracking-[0.15em] text-emerald-200 hover:bg-emerald-500/15 hover:border-emerald-500/60 transition-all active:scale-[0.99]"
           >
             <Plus className="h-4 w-4" strokeWidth={2.5} />
@@ -338,7 +338,7 @@ export default function TradingHome() {
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <SmallNav to="/tomorrow-prep"  icon={Sparkles}        title="Tomorrow's Prep"   enabled />
-            <SmallNav to="/trade-journal"  icon={BookText}        title="Trade Journal"     enabled />
+            <SmallNav to="/journal"  icon={BookText}        title="Journal"           enabled />
             <SmallNav to="/pre-trade"      icon={ClipboardCheck}  title="Pre-Trade Check"   />
             <SmallNav to="/performance"    icon={LineChart}       title="Performance"       />
             <SmallNav to="/rules"          icon={ScrollText}      title="My Rules"          />
