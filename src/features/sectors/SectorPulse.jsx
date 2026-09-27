@@ -9,6 +9,8 @@ import {
   Tooltip, CartesianGrid,
 } from 'recharts';
 import { supabase, authReady } from '../../lib/supabase';
+import MarketBar from '../../components/MarketBar';
+import { MARKET_TICKERS } from '../../lib/marketTickers';
 
 // Groups live in Supabase `pulse_groups` (edited here). sector_pulse.py on the
 // bot reads them every run and writes a snapshot to `market_pulse`, which this
@@ -29,6 +31,7 @@ const SESSION_LABEL = {
 };
 
 const STALE_MIN = 45;
+const MARKET_BAR_SYMBOLS = new Set(MARKET_TICKERS.map((t) => t.symbol));
 
 function pct(v, digits = 1) {
   if (v === null || v === undefined) return '—';
@@ -166,6 +169,9 @@ export default function SectorPulse() {
           )}
         </header>
 
+        {/* Live market bar — same component and tickers as the Watchlist page */}
+        <MarketBar />
+
         {editing && (
           <GroupEditor
             onClose={() => setEditing(false)}
@@ -181,10 +187,10 @@ export default function SectorPulse() {
 
         {row && (
           <>
-            {/* Index strip */}
-            {Object.keys(row.benchmarks || {}).length > 0 && (
+            {/* Index strip: only benchmark tickers the market bar doesn't already show */}
+            {Object.keys(row.benchmarks || {}).some((sym) => !MARKET_BAR_SYMBOLS.has(sym)) && (
               <section className="mb-4 grid grid-cols-3 gap-2">
-                {Object.entries(row.benchmarks).map(([sym, b]) => (
+                {Object.entries(row.benchmarks).filter(([sym]) => !MARKET_BAR_SYMBOLS.has(sym)).map(([sym, b]) => (
                   <div key={sym} className="rounded-md border border-neutral-800 bg-neutral-950/40 px-3 py-2.5">
                     <div className="flex items-baseline justify-between gap-2">
                       <span className="font-mono text-[12px] text-neutral-200">{sym}</span>

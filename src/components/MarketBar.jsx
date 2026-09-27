@@ -1,19 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { RefreshCw } from 'lucide-react';
+import { MARKET_TICKERS } from '../lib/marketTickers';
 
 // ---------------------------------------------------------------------------
 // Config — tickers to display and their labels
 // ---------------------------------------------------------------------------
 
-const MARKET_TICKERS = [
-  { symbol: 'SPY',  label: 'S&P 500' },
-  { symbol: 'QQQ',  label: 'NASDAQ'  },
-  { symbol: 'IWM',  label: 'R2000'   }, // small caps — confirms breadth
-  { symbol: 'IEF',  label: '10Y T'   }, // 7-10Y Treasury ETF — proxy for rates
-  { symbol: 'GLD',  label: 'Gold'    },
-  { symbol: 'USO',  label: 'Oil'     },
-  { symbol: 'IBIT', label: 'Bitcoin' }, // BlackRock Bitcoin ETF
-];
 
 // ---------------------------------------------------------------------------
 // Sentiment determination
