@@ -319,19 +319,30 @@ function GroupCard({ group: g, rank, total }) {
             {edge && <span className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">{edge}</span>}
           </div>
           <div className="mt-1 font-mono text-[11px] tabular-nums text-neutral-500">
-            {g.up}/{g.count} green · vs SPY 5d <span className={pctClass(g.rs5)}>{pct(g.rs5)}</span>
+            {g.up}/{g.count} green
+            {g.ema_known > 0 && <> · {g.above_ema20}/{g.ema_known} above 20-day avg</>}
+            {' '}· vs SPY 5d <span className={pctClass(g.rs5)}>{pct(g.rs5)}</span>
             {' '}· 20d <span className={pctClass(g.rs20)}>{pct(g.rs20)}</span>
           </div>
         </div>
-        <div className="flex gap-4 text-right font-mono tabular-nums">
-          {[['1d', g.r1, 2], ['5d', g.r5, 1], ['20d', g.r20, 1]].map(([label, v, d]) => (
-            <div key={label}>
-              <div className="text-[10px] uppercase tracking-wider text-neutral-600">{label}</div>
-              <div className={`${label === '1d' ? 'text-lg' : 'text-[13px] mt-1'} ${pctClass(v)}`}>{pct(v, d)}</div>
+        <div className="text-right">
+          <div className="flex gap-4 font-mono tabular-nums">
+            {[['1d', g.r1, 2], ['5d', g.r5, 1], ['20d', g.r20, 1]].map(([label, v, d]) => (
+              <div key={label}>
+                <div className="text-[10px] uppercase tracking-wider text-neutral-600">{label}</div>
+                <div className={`${label === '1d' ? 'text-lg' : 'text-[13px] mt-1'} ${pctClass(v)}`}>{pct(v, d)}</div>
+              </div>
+            ))}
+          </div>
+          {'avg_r1' in g && (
+            <div className="mt-0.5 text-[10px] text-neutral-600" title="Median of the group's tickers, so one outlier can't swing it">
+              median of picks
             </div>
-          ))}
+          )}
         </div>
       </div>
+
+      {g.ref && <SectorStrip g={g} />}
 
       {g.count === 0 ? (
         <div className="px-4 py-3 text-[12px] text-neutral-600">No price data for any ticker in this group.</div>
@@ -386,6 +397,38 @@ function GroupCard({ group: g, rank, total }) {
   );
 }
 
+function SectorStrip({ g }) {
+  const r = g.ref;
+  const vs = g.vs_ref || {};
+  const verdict = vs.r5 == null ? null
+    : vs.r5 >= 0.5 ? 'Your picks are beating the sector'
+    : vs.r5 <= -0.5 ? 'The ETF is beating your picks'
+    : 'Your picks are tracking the sector';
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-neutral-900 bg-neutral-900/30 px-4 py-2.5 text-[12px]">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Sector</span>
+        <span className="font-mono font-medium text-neutral-100">{r.symbol}</span>
+        <span className="font-mono tabular-nums text-neutral-400">
+          <span className={pctClass(r.r1)}>{pct(r.r1, 2)}</span> 1d · <span className={pctClass(r.r5)}>{pct(r.r5)}</span> 5d
+          {' '}· <span className={pctClass(r.r20)}>{pct(r.r20)}</span> 20d
+        </span>
+        <QuadrantChip q={r.quadrant} />
+        {r.above_ema20 != null && (
+          <span className="text-neutral-500">{r.above_ema20 ? 'above' : 'below'} 20-day avg</span>
+        )}
+      </div>
+      {verdict && (
+        <div className="font-mono tabular-nums text-neutral-400" title="Median of your picks minus the ETF's return">
+          <span className="font-sans text-neutral-500">{verdict}: </span>
+          <span className={pctClass(vs.r5)}>{vs.r5 > 0 ? '+' : ''}{vs.r5?.toFixed(1)} pts</span> 5d
+          {vs.r20 != null && <> · <span className={pctClass(vs.r20)}>{vs.r20 > 0 ? '+' : ''}{vs.r20.toFixed(1)} pts</span> 20d</>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Group editor — reads/writes Supabase pulse_groups
 // ---------------------------------------------------------------------------
@@ -396,6 +439,7 @@ function GroupEditor({ onClose, onSaved }) {
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [categories, setCategories] = useState([]); // [{ name, tickers }]
+  const [refSupported, setRefSupported] = useState(true);
 
   // Watchlist categories, so a group can be filled from one in a click.
   useEffect(() => {
@@ -422,12 +466,18 @@ function GroupEditor({ onClose, onSaved }) {
     (async () => {
       try {
         await authReady();
-        const { data, error: e } = await supabase
+        let { data, error: e } = await supabase
           .from('pulse_groups')
-          .select('id, name, tickers, is_benchmark, sort_order')
+          .select('id, name, tickers, is_benchmark, sort_order, ref_etf')
           .order('sort_order');
+        if (e && (e.message || '').includes('ref_etf')) {
+          // migration 003 not run yet: edit without the sector-ETF field
+          setRefSupported(false);
+          ({ data, error: e } = await supabase
+            .from('pulse_groups').select('id, name, tickers, is_benchmark, sort_order').order('sort_order'));
+        }
         if (e) throw e;
-        setRows((data || []).map((r) => ({ ...r, text: r.tickers.join(', ') })));
+        setRows((data || []).map((r) => ({ ...r, ref: r.ref_etf || '', text: r.tickers.join(', ') })));
         setOriginalIds((data || []).map((r) => r.id));
       } catch (e) {
         setError(
@@ -449,7 +499,7 @@ function GroupEditor({ onClose, onSaved }) {
     return next;
   });
   const remove = (i) => setRows((rs) => rs.filter((_, j) => j !== i));
-  const add = () => setRows((rs) => [...rs, { id: null, name: '', text: '', is_benchmark: false }]);
+  const add = () => setRows((rs) => [...rs, { id: null, name: '', text: '', ref: '', is_benchmark: false }]);
   const addFromCategory = (i, catName) => {
     const cat = categories.find((c) => c.name === catName);
     if (!cat) return;
@@ -462,6 +512,7 @@ function GroupEditor({ onClose, onSaved }) {
 
   const cleaned = (rows || []).map((r, i) => ({
     id: r.id, name: r.name.trim(), tickers: parseTickers(r.text), is_benchmark: r.is_benchmark, sort_order: i,
+    ref_etf: (r.ref || '').trim().toUpperCase().replace(/^\$/, '') || null,
   }));
   const names = cleaned.map((r) => r.name.toLowerCase());
   const problems = [
@@ -491,11 +542,13 @@ function GroupEditor({ onClose, onSaved }) {
         const { error: e } = await supabase.from('pulse_groups').update({
           name: r.name, tickers: r.tickers, is_benchmark: r.is_benchmark,
           sort_order: r.sort_order, updated_at: new Date().toISOString(),
+          ...(refSupported ? { ref_etf: r.ref_etf } : {}),
         }).eq('id', r.id);
         if (e) throw e;
       }
       const fresh = cleaned.filter((r) => !r.id).map((r) => ({
         name: r.name, tickers: r.tickers, is_benchmark: r.is_benchmark, sort_order: r.sort_order,
+        ...(refSupported ? { ref_etf: r.ref_etf } : {}),
       }));
       if (fresh.length) {
         const { error: e } = await supabase.from('pulse_groups').insert(fresh);
@@ -515,8 +568,9 @@ function GroupEditor({ onClose, onSaved }) {
         <div>
           <div className="text-[11px] uppercase tracking-[0.22em] text-emerald-300">Edit groups</div>
           <div className="mt-0.5 text-[12px] text-neutral-500">
-            Tickers separated by commas or spaces. Mark a group as <em>index strip</em> to show it as the
-            row of index tiles at the top instead of a ranked card.
+            Tickers separated by commas or spaces. <em>Sector ETF</em> is the benchmark for the group
+            (e.g. SMH for semis) — it isn’t counted as one of your picks. Mark a group as <em>index strip</em> to
+            show it as the row of index tiles at the top instead of a ranked card.
           </div>
         </div>
         <button onClick={onClose} aria-label="Close editor" className="text-neutral-500 hover:text-neutral-200">
@@ -525,6 +579,9 @@ function GroupEditor({ onClose, onSaved }) {
       </div>
 
       {error && <Banner tone="error">{error}</Banner>}
+      {!refSupported && (
+        <Banner tone="warn">Run migrations/003_pulse_ref_etf.sql in Supabase to enable the Sector ETF field.</Banner>
+      )}
       {rows === null && <div className="py-4 text-[13px] text-neutral-500">Loading…</div>}
 
       <div className="mt-2 space-y-2">
@@ -538,6 +595,16 @@ function GroupEditor({ onClose, onSaved }) {
                 aria-label="Group name"
                 className="min-w-0 flex-1 rounded border border-neutral-800 bg-transparent px-2 py-1.5 text-[13px] text-neutral-100 placeholder:text-neutral-700 focus:border-emerald-500/50 focus:outline-none"
               />
+              {refSupported && !r.is_benchmark && (
+                <input
+                  value={r.ref}
+                  onChange={(e) => update(i, { ref: e.target.value })}
+                  placeholder="Sector ETF (e.g. SMH)"
+                  aria-label="Sector ETF"
+                  title="Reference ETF: shows whether the sector is trending and whether your picks beat it"
+                  className="w-40 rounded border border-neutral-800 bg-transparent px-2 py-1.5 font-mono text-[12px] uppercase text-neutral-200 placeholder:normal-case placeholder:font-sans placeholder:text-neutral-700 focus:border-emerald-500/50 focus:outline-none"
+                />
+              )}
               <label className="flex items-center gap-1.5 text-[11px] text-neutral-400">
                 <input
                   type="checkbox"
