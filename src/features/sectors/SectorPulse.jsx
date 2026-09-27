@@ -208,14 +208,6 @@ export default function SectorPulse() {
             {/* Top setups */}
             {row.setups && <TopSetups setups={row.setups} />}
 
-            {/* Narrative */}
-            {row.narrative && (
-              <section className="mb-6 rounded-md border border-neutral-800 bg-neutral-950/40 px-4 py-4">
-                <div className="text-[10px] uppercase tracking-[0.22em] text-emerald-400/80">Read of the tape</div>
-                <p className="mt-2 text-[14px] leading-relaxed text-neutral-300">{row.narrative}</p>
-              </section>
-            )}
-
             {/* Groups */}
             <section className="space-y-4">
               {groups.map((g, i) => <GroupCard key={g.name} group={g} rank={i + 1} total={groups.length} />)}
