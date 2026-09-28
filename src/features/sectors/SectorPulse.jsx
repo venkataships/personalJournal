@@ -70,6 +70,7 @@ export default function SectorPulse() {
   const [editing, setEditing] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [savedNote, setSavedNote] = useState(false);
+  const [recalc, setRecalc] = useState(null); // null | 'waiting' | message string
 
   const load = useCallback(async () => {
     setState((s) => ({ ...s, loading: true, error: null }));
@@ -96,6 +97,41 @@ export default function SectorPulse() {
     const id = setInterval(load, 5 * 60 * 1000);
     return () => clearInterval(id);
   }, [load]);
+
+  // "Recalculate now": leave a request for the bot (it checks every minute),
+  // then watch for a newer snapshot. Falls back to a plain reload if
+  // migration 008 (pulse_requests) hasn't been run.
+  async function recalculate() {
+    const before = state.row?.as_of;
+    setRecalc('waiting');
+    try {
+      await authReady();
+      const { data: req, error } = await supabase.from('pulse_requests').insert({}).select('id').single();
+      if (error) {
+        await load();
+        setRecalc(/pulse_requests/i.test(error.message || '') ? 'Reloaded. For a fresh run, add migration 008 in Supabase.' : error.message);
+        return;
+      }
+      const started = Date.now();
+      while (Date.now() - started < 4 * 60 * 1000) {
+        await new Promise((r) => setTimeout(r, 8000));
+        const [{ data: snap }, { data: rq }] = await Promise.all([
+          supabase.from('market_pulse').select('as_of').order('as_of', { ascending: false }).limit(1).maybeSingle(),
+          supabase.from('pulse_requests').select('status, note').eq('id', req.id).maybeSingle(),
+        ]);
+        if ((snap?.as_of && snap.as_of !== before) || ['done', 'skipped', 'error'].includes(rq?.status)) {
+          await load();
+          setRecalc(rq?.status === 'error' ? `Run failed: ${rq.note || 'see server log'}`
+            : rq?.status === 'skipped' ? 'Already up to date (less than 2 min old).' : null);
+          return;
+        }
+      }
+      await load();
+      setRecalc('No response from the bot in 4 min — is the server running?');
+    } catch (e) {
+      setRecalc(e.message || 'Recalculate failed.');
+    }
+  }
 
   const row = state.row;
   const groups = row?.groups || [];
@@ -137,11 +173,20 @@ export default function SectorPulse() {
               <IconButton label="Edit groups" onClick={() => setEditing((v) => !v)} active={editing}>
                 <Pencil className="h-4 w-4" strokeWidth={1.75} />
               </IconButton>
-              <IconButton label="Refresh" onClick={load} disabled={state.loading}>
-                <RefreshCw className={`h-4 w-4 ${state.loading ? 'animate-spin' : ''}`} strokeWidth={1.75} />
-              </IconButton>
+              <button type="button" onClick={recalculate} disabled={recalc === 'waiting'}
+                title="Run a fresh pulse now (the bot picks it up within a minute; takes ~1-2 min)"
+                className="inline-flex items-center gap-1.5 rounded border border-neutral-800 px-2.5 py-2 text-[12px] text-neutral-400 hover:border-emerald-500/40 hover:text-emerald-300 disabled:opacity-70">
+                <RefreshCw className={`h-4 w-4 ${recalc === 'waiting' || state.loading ? 'animate-spin' : ''}`} strokeWidth={1.75} />
+                <span className="hidden sm:inline">{recalc === 'waiting' ? 'Recalculating…' : 'Recalculate'}</span>
+              </button>
             </div>
           </div>
+          {recalc === 'waiting' && (
+            <div className="mt-2 text-right text-[11px] text-neutral-500">Asked the bot for a fresh run — usually 1–2 minutes. You can keep using the page.</div>
+          )}
+          {recalc && recalc !== 'waiting' && (
+            <div className="mt-2 text-right text-[11px] text-amber-300/90">{recalc}</div>
+          )}
 
           {state.error && (
             <Banner tone="error">
