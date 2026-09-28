@@ -363,21 +363,6 @@ function GroupCard({ group: g, rank, total, inTrade }) {
             {' '}· 20d <span className={pctClass(g.rs20)}>{pct(g.rs20)}</span>
           </div>
         </div>
-        <div className="text-right">
-          <div className="flex gap-4 font-mono tabular-nums">
-            {[['1d', g.r1, 2], ['5d', g.r5, 1], ['20d', g.r20, 1]].map(([label, v, d]) => (
-              <div key={label}>
-                <div className="text-[10px] uppercase tracking-wider text-neutral-600">{label}</div>
-                <div className={`${label === '1d' ? 'text-lg' : 'text-[13px] mt-1'} ${pctClass(v)}`}>{pct(v, d)}</div>
-              </div>
-            ))}
-          </div>
-          {'avg_r1' in g && (
-            <div className="mt-0.5 text-[10px] text-neutral-600" title="Median of the group's tickers, so one outlier can't swing it">
-              median of picks
-            </div>
-          )}
-        </div>
       </div>
 
       {g.ref && <SectorStrip g={g} />}
@@ -514,7 +499,7 @@ function RetestChip({ m }) {
     : `Opened above yesterday's high, pulled back to ${m.retest_level} and is holding above it`;
   return (
     <span title={tip} className={`inline-flex items-center gap-1 whitespace-nowrap rounded border border-emerald-500/50 bg-emerald-500/15 px-1.5 py-0.5 text-[11px] text-emerald-200 ${m.pd_live ? 'border-dashed' : ''}`}>
-      <span aria-hidden>↩</span>Retest
+      <span aria-hidden>{'\u21A9\uFE0E'}</span>Retest
     </span>
   );
 }

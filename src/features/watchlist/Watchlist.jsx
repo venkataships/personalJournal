@@ -314,7 +314,15 @@ export default function Watchlist() {
                 {items.length} active ticker{items.length !== 1 ? 's' : ''} across {categories.length} group{categories.length !== 1 ? 's' : ''}
               </p>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Link
+                to="/sectors"
+                className="inline-flex items-center gap-1.5 rounded-md border border-neutral-800 px-3 py-2 text-[12px] text-neutral-400 hover:border-emerald-500/40 hover:text-emerald-300 transition-colors"
+              >
+                <Radar className="h-3.5 w-3.5" strokeWidth={2} />
+                <span className="sm:hidden">Sectors</span>
+                <span className="hidden sm:inline">Sector Pulse</span>
+              </Link>
               {/* Search */}
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-neutral-500" strokeWidth={2} />
