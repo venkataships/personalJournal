@@ -213,7 +213,7 @@ export default function SectorPulse() {
             )}
 
             {/* Top setups */}
-            {row.setups && <TopSetups setups={row.setups} inTrade={state.inTrade} />}
+            {row.setups && <TopSetups setups={row.setups} market={row.risk?.state !== undefined ? row.risk : null} inTrade={state.inTrade} />}
 
             {/* Groups */}
             <section className="space-y-4">
@@ -390,12 +390,13 @@ function GroupCard({ group: g, rank, total, inTrade }) {
             <colgroup>
               <col className="w-[17%] sm:w-[9%]" />
               <col className="w-[19%] sm:w-[10%]" />
-              <col className="w-[17%] sm:w-[9%]" />
+              <col className="w-[17%] sm:w-[8%]" />
               <col className="hidden sm:table-column sm:w-[8%]" />
               <col className="hidden sm:table-column sm:w-[8%]" />
               <col className="hidden sm:table-column sm:w-[9%]" />
               <col className="w-[25%] sm:w-[22%]" />
-              <col className="w-[22%] sm:w-[15%]" />
+              <col className="w-[22%] sm:w-[13%]" />
+              <col className="hidden sm:table-column sm:w-[5%]" />
               <col className="hidden sm:table-column sm:w-[8%]" />
             </colgroup>
             <thead>
@@ -408,6 +409,7 @@ function GroupCard({ group: g, rank, total, inTrade }) {
                 <th className="hidden sm:table-cell px-2 py-2 text-right font-normal" title="5-day return minus SPY's">vs SPY 5d</th>
                 <th className="pl-3 pr-2 py-2 font-normal" title="Price vs the previous day's high (PDH) and low (PDL)">vs PDH/PDL</th>
                 <th className="pl-2 pr-2 py-2 font-normal">Phase</th>
+                <th className="hidden sm:table-cell px-1 py-2 text-center font-normal" title="Daily 8 EMA vs 21 EMA — ▲ 8 over 21 and price above (buyers in control) · ▼ sellers in control · ~ mixed">8/21</th>
                 <th className="hidden sm:table-cell pr-4 py-2 font-normal" title="Volume vs 20-day average">Vol</th>
               </tr>
             </thead>
@@ -424,6 +426,7 @@ function GroupCard({ group: g, rank, total, inTrade }) {
                   <td className={`hidden sm:table-cell px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.rs5)}`}>{pct(m.rs5)}</td>
                   <td className="pl-3 pr-2 py-2"><PdCell m={m} /></td>
                   <td className="pl-2 pr-2 py-2"><QuadrantChip q={m.quadrant} compact note={m.phase_note} /></td>
+                  <td className="hidden sm:table-cell px-1 py-2 text-center"><EmaTag m={m} compact /></td>
                   <td className="hidden sm:table-cell pr-4 py-2"><FlowTag flow={m.flow} rvol={m.rvol} /></td>
                 </tr>
               ))}
@@ -492,13 +495,69 @@ function PdCell({ m }) {
   return (
     <div className="flex items-center gap-2">
       <span className="hidden sm:inline-flex"><PdBar m={m} /></span>
-      <PdChip m={m} />
+      {m.retest ? <RetestChip m={m} /> : <PdChip m={m} />}
       {m.hh_hl_streak >= 2 && (
         <span className="hidden sm:inline font-mono text-[10px] text-emerald-500" title={`${m.hh_hl_streak} days of higher highs & higher lows`}>↗{m.hh_hl_streak}d</span>
       )}
       {m.hh_hl_streak <= -2 && (
         <span className="hidden sm:inline font-mono text-[10px] text-rose-500" title={`${-m.hh_hl_streak} days of lower highs & lower lows`}>↘{-m.hh_hl_streak}d</span>
       )}
+    </div>
+  );
+}
+
+// Break -> pullback to the level -> held. The entry the checklist waits for.
+function RetestChip({ m }) {
+  if (!m.retest) return null;
+  const tip = m.retest === 'day2'
+    ? `Broke out yesterday, pulled back to ${m.retest_level} today and is holding above it`
+    : `Opened above yesterday's high, pulled back to ${m.retest_level} and is holding above it`;
+  return (
+    <span title={tip} className={`inline-flex items-center gap-1 whitespace-nowrap rounded border border-emerald-500/50 bg-emerald-500/15 px-1.5 py-0.5 text-[11px] text-emerald-200 ${m.pd_live ? 'border-dashed' : ''}`}>
+      <span aria-hidden>↩</span>Retest
+    </span>
+  );
+}
+
+const EMA_TREND = {
+  up:    { icon: '▲', label: 'up',    cls: 'text-emerald-400', tip: '8 EMA over 21, price above — buyers in control' },
+  down:  { icon: '▼', label: 'down',  cls: 'text-rose-400',    tip: '8 EMA under 21, price below — sellers in control' },
+  mixed: { icon: '~', label: 'mixed', cls: 'text-neutral-400', tip: 'Crossing or pulling back through the 21 — no clear control' },
+};
+
+function EmaTag({ m, compact }) {
+  const e = EMA_TREND[m.ema_trend];
+  if (!e) return <span className="text-neutral-700">—</span>;
+  const lv = m.ema8 != null && m.ema21 != null ? ` (8: ${m.ema8} · 21: ${m.ema21})` : '';
+  return (
+    <span title={`Daily 8/21 ${e.label}: ${e.tip}${lv}`} className={`whitespace-nowrap font-mono text-[11px] ${e.cls}`}>
+      <span aria-hidden>{e.icon}</span>{compact ? <span className="sr-only"> {e.label}</span> : ` ${e.label}`}
+    </span>
+  );
+}
+
+const GATE = {
+  green:   { label: 'Green',             cls: 'border-emerald-500/40 bg-emerald-500/5', text: 'text-emerald-300' },
+  caution: { label: 'Caution',           cls: 'border-amber-500/40 bg-amber-500/5',     text: 'text-amber-300' },
+  red:     { label: 'Market says wait',  cls: 'border-rose-500/40 bg-rose-500/5',       text: 'text-rose-300' },
+};
+
+function MarketGate({ market }) {
+  const g = GATE[market?.state];
+  if (!g) return null;
+  const effect = market.state === 'red' ? 'Setups shown but scored −15.'
+    : market.state === 'caution' ? 'Setups scored −5.' : 'Setups scored normally.';
+  return (
+    <div className={`mb-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-md border px-3 py-2 text-[12px] ${g.cls}`}>
+      <span className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Market gate</span>
+      <span className={`font-medium ${g.text}`}>{g.label}</span>
+      {['SPY', 'QQQ'].map((sym) => market[sym] && (
+        <span key={sym} className="inline-flex items-center gap-1.5">
+          <span className="font-mono text-neutral-200">{sym}</span>
+          <EmaTag m={{ ema_trend: market[sym].trend, ema8: market[sym].ema8, ema21: market[sym].ema21 }} />
+        </span>
+      ))}
+      <span className="text-neutral-500">{effect}</span>
     </div>
   );
 }
@@ -521,9 +580,12 @@ function SectorStrip({ g }) {
         </span>
         <QuadrantChip q={r.quadrant} note={r.phase_note} />
         {r.pd_state && <PdChip m={r} />}
-        {r.above_ema20 != null && (
+        {r.ema_trend ? (
+          <span className="inline-flex items-center gap-1 text-neutral-500">8/21 <EmaTag m={r} /></span>
+        ) : r.above_ema20 != null && (
           <span className="text-neutral-500">{r.above_ema20 ? 'above' : 'below'} 20-day avg</span>
         )}
+        <RetestChip m={r} />
       </div>
       {verdict && (
         <div className="font-mono tabular-nums text-neutral-400" title="Median of your picks minus the ETF's return">
@@ -542,17 +604,20 @@ function SectorStrip({ g }) {
 
 const POINT_LABELS = {
   volume: ['Volume', 25], strength: ['5d vs SPY', 20], sector: ['Sector', 15],
-  trend: ['HH/HL streak', 15], entry: ['Near PDH', 15], extension: ['Not extended', 10],
+  trend: ['HH/HL streak', 15], entry: ['Entry (retest 15, near PDH 10)', 15], extension: ['Not extended', 10],
+  market: ['Market gate', 0],
 };
 
 const SETUP_RULES =
-  'Must: holding above yesterday\'s high · Leading/Improving vs SPY · above 20-day avg · sector ETF not Lagging. '
-  + 'Score: volume 25, 5d strength 20, sector 15, higher-highs streak 15, close to PDH 15, not extended 10.';
+  'Must: a break above yesterday\'s high, or a held retest of one · Leading/Improving vs SPY · daily 8 EMA over 21 with price above · sector ETF not Lagging. '
+  + 'Score: volume 25, 5d strength 20, sector 15, higher-highs streak 15, entry 15 (retest held 15, near PDH 10), not extended 10. '
+  + 'Market gate: caution −5, red −15.';
 
-function TopSetups({ setups, inTrade }) {
+function TopSetups({ setups, market, inTrade }) {
   const picks = setups.picks || [];
   return (
     <section className="mb-6">
+      <MarketGate market={market} />
       <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
         <div>
           <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-400" title={SETUP_RULES}>
@@ -589,6 +654,7 @@ const QUAL_COLS = [
   { key: 'rs5',      label: 'vs SPY 5d',  num: true, title: 'Points ahead of SPY over 5 days' },
   { key: 'rvol',     label: 'Vol',        num: true, title: 'Volume vs 20-day average' },
   { key: 'dist_pdh', label: 'Above PDH',  num: true, title: 'How far above yesterday\'s high — smaller is a closer entry' },
+  { key: 'entry_type', label: 'Entry',   title: 'Retest = broke out, pulled back to the level and held · Break = no retest yet' },
   { key: 'quadrant', label: 'Phase' },
   { key: 'sector',   label: 'Sector ETF' },
 ];
@@ -632,7 +698,7 @@ function QualifiedTable({ rows, inTrade }) {
       </button>
       {open && (
         <div className="overflow-x-auto border-t border-neutral-900">
-          <table className="w-full min-w-[720px] text-[12px]">
+          <table className="w-full min-w-[800px] text-[12px]">
             <thead>
               <tr className="text-[10px] uppercase tracking-wider text-neutral-500">
                 {QUAL_COLS.map((c) => (
@@ -667,6 +733,9 @@ function QualifiedTable({ rows, inTrade }) {
                   <td className={`px-2 py-1.5 text-right font-mono tabular-nums ${(r.dist_pdh || 0) > 4 ? 'text-amber-300' : 'text-neutral-300'}`}>
                     {r.dist_pdh != null ? `${r.dist_pdh.toFixed(1)}%` : '—'}
                   </td>
+                  <td className="px-2 py-1.5">
+                    {r.entry_type === 'retest' ? <RetestChip m={r} /> : r.entry_type ? <span className="text-[11px] text-neutral-500">Break</span> : '—'}
+                  </td>
                   <td className="px-2 py-1.5"><QuadrantChip q={r.quadrant} compact /></td>
                   <td className="whitespace-nowrap px-2 py-1.5 text-neutral-400">
                     {r.sector_etf ? <>{r.sector_etf} <span className={QUADRANT[r.sector_phase]?.text || 'text-neutral-600'}>{r.sector_phase || ''}</span></> : '—'}
@@ -689,7 +758,7 @@ function QualifiedTable({ rows, inTrade }) {
 
 function SetupCard({ p, rank, inTrade }) {
   const breakdown = Object.entries(p.points || {})
-    .map(([k, v]) => `${POINT_LABELS[k]?.[0] ?? k}: ${v}/${POINT_LABELS[k]?.[1] ?? '?'}`).join(' · ');
+    .map(([k, v]) => (k === 'market' ? `Market gate: ${v}` : `${POINT_LABELS[k]?.[0] ?? k}: ${v}/${POINT_LABELS[k]?.[1] ?? '?'}`)).join(' · ');
   return (
     <div className={`flex flex-col rounded-md border bg-neutral-950/50 px-3 py-3 ${p.pd_live ? 'border-dashed border-neutral-700' : 'border-neutral-800'}`}
       title={p.pd_live ? 'Live — provisional until the close' : undefined}>
@@ -703,6 +772,14 @@ function SetupCard({ p, rank, inTrade }) {
           <div className="mt-0.5 truncate text-[11px] capitalize text-neutral-500">
             {p.source}{p.sector_etf ? ` · ${p.sector_etf}` : ''}
           </div>
+          {p.entry_type && (
+            <div className="mt-1">
+              {p.entry_type === 'retest' ? <RetestChip m={p} /> : (
+                <span title="Broke yesterday's high but hasn't pulled back and held yet — the post's rule: wait for the retest"
+                  className="inline-flex rounded border border-neutral-700 px-1.5 py-0.5 text-[11px] text-neutral-400">Break only</span>
+              )}
+            </div>
+          )}
         </div>
         <div className="text-right" title={breakdown}>
           <div className="font-mono text-lg tabular-nums text-neutral-100">{p.score}</div>
@@ -718,7 +795,7 @@ function SetupCard({ p, rank, inTrade }) {
       </div>
       <div className="mt-1 text-[11px] text-neutral-400">
         Invalid below <span className="font-mono text-neutral-200">{p.invalid_below}</span>
-        <span className="text-neutral-600"> (PDH)</span>
+        <span className="text-neutral-600"> ({p.entry_type === 'retest' ? 'retest level' : 'PDH'})</span>
       </div>
       {p.reasons?.length > 0 && (
         <ul className="mt-2 space-y-0.5 text-[11px] text-emerald-300/90">

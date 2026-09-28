@@ -9,7 +9,7 @@ import { usePortfolio } from '../../hooks/usePortfolio';
 import {
   SETUPS, MISTAKES, STATES, DEFAULT_LIMITS, setupLabel, mistakeLabel, positionValue, computePnl,
   riskAmount, rMultiple, closeStatus, positionCap, tradeValue, isClosed, riskCheck, pulseContext,
-  journalStats, usd, signedUsd, todayET, daysAgoET,
+  journalStats, usd, signedUsd, todayET, daysAgoET, CHECKLIST, prefillChecklist, checklistScore,
 } from '../../lib/journal';
 
 // Log every trade (here or /log in Telegram), close it, review it. Risk rules
@@ -26,6 +26,20 @@ function num(v) {
 const pnlClass = (v) => (v == null ? 'text-neutral-500' : v > 0 ? 'text-emerald-400' : v < 0 ? 'text-rose-400' : 'text-neutral-400');
 const daysSince = (iso) => (iso ? Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 86400000)) : null);
 const needsReason = (f) => !f.reason || f.reason.startsWith('(logged from Telegram');
+
+// Insert/update that still works before migration 007 (checklist column) is run.
+async function writeTrade(row, id) {
+  const run = (r) => (id ? supabase.from('trade_journal').update(r).eq('id', id) : supabase.from('trade_journal').insert(r));
+  let { error } = await run(row);
+  if (error && 'checklist' in row && /checklist/i.test(error.message || '')) {
+    const rest = { ...row };
+    delete rest.checklist;
+    ({ error } = await run(rest));
+    if (!error) return 'Saved without the checklist — run migration 007_journal_checklist.sql in Supabase.';
+  }
+  if (error) throw error;
+  return null;
+}
 
 async function fetchQuotes(tickers) {
   const out = new Map();
@@ -58,14 +72,15 @@ export default function Journal() {
       const [tr, lim, snap] = await Promise.all([
         supabase.from('trade_journal').select('*').order('date', { ascending: false }).limit(500),
         supabase.from('risk_limits').select('*').eq('id', 1).maybeSingle(),
-        supabase.from('market_pulse').select('as_of, session, groups, setups').order('as_of', { ascending: false }).limit(1).maybeSingle(),
+        supabase.from('market_pulse').select('as_of, session, groups, setups, risk').order('as_of', { ascending: false }).limit(1).maybeSingle(),
       ]);
       if (tr.error) throw tr.error;
       setState({
         loading: false, error: null, trades: tr.data || [],
         limits: lim.data ? { ...DEFAULT_LIMITS, ...lim.data } : DEFAULT_LIMITS,
         limitsMissing: !!lim.error,
-        snapshot: snap.data || null,
+        // market gate is stored in market_pulse.risk
+        snapshot: snap.data ? { ...snap.data, market: snap.data.risk?.state !== undefined ? snap.data.risk : null } : null,
       });
       const openStocks = (tr.data || []).filter((t) => t.status === 'open' && (t.instrument || 'stock') === 'stock').map((t) => t.ticker);
       if (openStocks.length) fetchQuotes(openStocks).then(setQuotes);
@@ -274,7 +289,7 @@ function Chips({ options, value, onChange, multi }) {
 
 function PulseRead({ ctx }) {
   if (!ctx) return <div className="text-[12px] text-neutral-600">No Sector Pulse snapshot yet.</div>;
-  if (!ctx.top_setup && !ctx.phase) return <div className="text-[12px] text-neutral-500">Not in your pulse groups or today’s Top Setups — this one is your own call.</div>;
+  if (!ctx.top_setup && !ctx.phase && !ctx.qualified) return <div className="text-[12px] text-neutral-500">Not in your pulse groups or today’s Top Setups — this one is your own call.</div>;
   return (
     <div className="flex flex-wrap items-center gap-1.5 text-[12px]">
       {ctx.top_setup && (
@@ -282,10 +297,56 @@ function PulseRead({ ctx }) {
           Top Setup #{ctx.setup_rank} · {ctx.setup_score}/100 · invalid below {ctx.invalid_below}
         </span>
       )}
+      {ctx.qualified && !ctx.top_setup && (
+        <span className="rounded border border-emerald-500/25 px-1.5 py-0.5 text-emerald-300/90">Qualified setup · {ctx.setup_score}/100 · invalid below {ctx.invalid_below}</span>
+      )}
+      {ctx.retest && <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-emerald-200">Retest held at {ctx.retest_level}</span>}
+      {ctx.market_state && <span className={`rounded border px-1.5 py-0.5 ${ctx.market_state === 'green' ? 'border-emerald-500/30 text-emerald-300' : ctx.market_state === 'red' ? 'border-rose-500/40 text-rose-300' : 'border-amber-500/40 text-amber-300'}`}>market {ctx.market_state === 'red' ? 'says wait' : ctx.market_state}</span>}
       {ctx.phase && <span className="rounded border border-neutral-700 px-1.5 py-0.5 text-neutral-300">{ctx.phase} vs SPY</span>}
+      {ctx.ema_trend && <span className="rounded border border-neutral-700 px-1.5 py-0.5 text-neutral-300">8/21 {ctx.ema_trend}</span>}
       {ctx.pd_event && <span className="rounded border border-neutral-700 px-1.5 py-0.5 text-neutral-300">{ctx.pd_event.replace('_', ' ')}</span>}
       {ctx.sector_etf && <span className="rounded border border-neutral-700 px-1.5 py-0.5 text-neutral-300">sector {ctx.sector_etf} {ctx.sector_phase?.toLowerCase()}</span>}
     </div>
+  );
+}
+
+const CL_NEXT = { null: true, true: false, false: null };
+
+// Tap to cycle: ✓ yes → ✗ no → ? not sure. "auto" = filled from the pulse snapshot.
+function Checklist({ value, auto, onChange }) {
+  const n = checklistScore(value);
+  return (
+    <div>
+      <div className="mb-1 flex items-baseline justify-between">
+        <span className={label}>Checklist — market → sector → leader → level → break → retest → 8/21</span>
+        <span className={`font-mono text-[12px] tabular-nums ${n === 7 ? 'text-emerald-300' : n >= 5 ? 'text-neutral-200' : 'text-amber-300'}`}>{n}/7</span>
+      </div>
+      <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-7">
+        {CHECKLIST.map((c) => {
+          const v = value[c.id];
+          const isAuto = auto && auto[c.id] !== null && auto[c.id] === v;
+          return (
+            <button key={c.id} type="button" title={`${c.hint}${isAuto ? ' (from Sector Pulse — tap to change)' : ''}`}
+              onClick={() => onChange({ ...value, [c.id]: CL_NEXT[String(v)] })}
+              className={`rounded border px-1.5 py-1.5 text-center text-[11px] transition-colors ${v === true ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-200' : v === false ? 'border-rose-500/40 bg-rose-500/5 text-rose-300' : 'border-neutral-800 text-neutral-500'}`}>
+              <span className="mr-1 font-mono">{v === true ? '✓' : v === false ? '✗' : '?'}</span>{c.label}
+              {isAuto && <span className="block text-[9px] uppercase tracking-wider opacity-50">auto</span>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ChecklistChip({ cl }) {
+  const n = checklistScore(cl);
+  if (n == null) return null;
+  const tip = CHECKLIST.map((c) => `${cl[c.id] === true ? '✓' : cl[c.id] === false ? '✗' : '?'} ${c.label}`).join('  ');
+  return (
+    <span title={tip} className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${n === 7 ? 'border-emerald-500/40 text-emerald-300' : n >= 5 ? 'border-neutral-700 text-neutral-300' : 'border-amber-500/40 text-amber-300'}`}>
+      {n}/7{cl.retest === true ? ' retest' : ''}
+    </span>
   );
 }
 
@@ -303,6 +364,7 @@ function LogForm({ params, limits, acct, open, closedToday, snapshot, onCancel, 
     state: null,
   }));
   const [reasons, setReasons] = useState({});
+  const [clEdits, setClEdits] = useState({}); // user taps override the auto-fill
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(null);
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
@@ -315,6 +377,8 @@ function LogForm({ params, limits, acct, open, closedToday, snapshot, onCancel, 
   const risk = entry && qty ? riskAmount(entry, stop, qty, f.instrument) : null;
   const cap = positionCap(limits, acct);
   const ctx = useMemo(() => (ticker ? pulseContext(snapshot, ticker) : null), [snapshot, ticker]);
+  const clAuto = prefillChecklist(ticker ? ctx : null, stop, f.direction);
+  const checklist = { ...clAuto, ...clEdits };
   const flags = riskCheck(limits, acct, open, closedToday,
     { ticker, instrument: f.instrument, entry_price: entry, quantity: qty, stop_loss: stop });
   const missingReason = flags.filter((fl) => (reasons[fl.rule] || '').trim().length < 3);
@@ -340,11 +404,10 @@ function LogForm({ params, limits, acct, open, closedToday, snapshot, onCancel, 
         trade_type: f.setup === 'discord' ? 'discord_alert' : 'independent',
         status: 'open', source: 'dashboard', pulse_context: ctx,
         risk_flags: flags.map((fl) => ({ ...fl, reason: reasons[fl.rule].trim() })),
-        opened_at: now.toISOString(),
+        opened_at: now.toISOString(), checklist,
       };
-      const { error } = await supabase.from('trade_journal').insert(row);
-      if (error) throw error;
-      onSaved(`Logged ${f.direction} ${ticker} — ${usd(value)}${flags.length ? ` with ${flags.length} rule break${flags.length > 1 ? 's' : ''} on record` : ''}.`);
+      const warn = await writeTrade(row);
+      onSaved(`Logged ${f.direction} ${ticker} — ${usd(value)}, checklist ${checklistScore(checklist)}/7${flags.length ? `, ${flags.length} rule break${flags.length > 1 ? 's' : ''} on record` : ''}.${warn ? ` ${warn}` : ''}`);
     } catch (e) {
       setErr(e.message || 'Save failed.');
     } finally {
@@ -403,6 +466,12 @@ function LogForm({ params, limits, acct, open, closedToday, snapshot, onCancel, 
       <div className="mt-3 rounded border border-neutral-900 bg-neutral-900/30 px-3 py-2">
         <div className={label}>What the system says</div>
         <PulseRead ctx={ticker ? ctx : null} />
+      </div>
+
+      <div className="mt-3">
+        <Checklist value={checklist} auto={clAuto} onChange={(next) => setClEdits(
+          Object.fromEntries(Object.entries(next).filter(([k, v]) => v !== clAuto[k])),
+        )} />
       </div>
 
       {flags.length > 0 && (
@@ -464,7 +533,7 @@ function OpenTrades({ trades, quotes, onDone }) {
                       {t.option_desc && <span className="font-mono text-[11px] text-neutral-400">{t.option_desc}</span>}
                       {t.direction === 'short' && <span className="text-[10px] uppercase text-amber-300">short</span>}
                     </div>
-                    <div className="mt-1 flex flex-wrap gap-1"><SetupChip id={t.setup} />
+                    <div className="mt-1 flex flex-wrap gap-1"><SetupChip id={t.setup} /><ChecklistChip cl={t.checklist} />
                       {t.pulse_context?.top_setup && t.setup !== 'top_setup' && <span className="rounded border border-emerald-500/30 px-1.5 py-0.5 text-[10px] text-emerald-300">Top Setup</span>}
                       {flags.length > 0 && <span title={flags.map((x) => `${x.message} — ${x.reason || 'no reason'}`).join('\n')} className="rounded border border-rose-500/40 px-1.5 py-0.5 text-[10px] text-rose-300">{flags.length} rule break{flags.length > 1 ? 's' : ''}</span>}
                     </div>
@@ -573,18 +642,18 @@ function EditPanel({ t, onDone }) {
   const [stop, setStop] = useState(t.stop_loss ?? '');
   const [why, setWhy] = useState(t.thesis || '');
   const [flags, setFlags] = useState(t.risk_flags || []);
+  const [cl, setCl] = useState(() => t.checklist || prefillChecklist(t.pulse_context, t.stop_loss, t.direction));
   const [err, setErr] = useState(null);
   async function save() {
     setErr(null);
     try {
       await authReady();
       const s = num(stop);
-      const { error } = await supabase.from('trade_journal').update({
-        stop_loss: s, thesis: why.trim() || null, risk_flags: flags,
+      const warn = await writeTrade({
+        stop_loss: s, thesis: why.trim() || null, risk_flags: flags, checklist: cl,
         stop_loss_pct: s && t.entry_price ? Math.round((Math.abs(t.entry_price - s) / t.entry_price) * 10000) / 100 : null,
-      }).eq('id', t.id);
-      if (error) throw error;
-      onDone(`Updated ${t.ticker}.`);
+      }, t.id);
+      onDone(`Updated ${t.ticker}.${warn ? ` ${warn}` : ''}`);
     } catch (e) { setErr(e.message || 'Save failed.'); }
   }
   return (
@@ -596,6 +665,7 @@ function EditPanel({ t, onDone }) {
           <input className={input} value={why} onChange={(e) => setWhy(e.target.value)} /></div>
       </div>
       {t.pulse_context && <div className="mt-3"><span className={label}>System read when logged</span><PulseRead ctx={t.pulse_context} /></div>}
+      <div className="mt-3"><Checklist value={cl} auto={t.checklist ? null : cl} onChange={setCl} /></div>
       {flags.length > 0 && (
         <div className="mt-3 space-y-2">
           <span className={label}>Rule breaks at entry</span>
@@ -636,6 +706,7 @@ function ClosedTrades({ trades, onDone }) {
                 <span className={`w-24 font-mono tabular-nums ${pnlClass(Number(t.pnl))}`}>{signedUsd(Number(t.pnl), 0)}</span>
                 <span className="w-14 font-mono tabular-nums text-neutral-400">{t.r_multiple != null ? `${Number(t.r_multiple).toFixed(1)}R` : '—'}</span>
                 <SetupChip id={t.setup} />
+                <ChecklistChip cl={t.checklist} />
                 {t.status === 'stopped_out' && <span className="text-[10px] uppercase text-neutral-500">stopped</span>}
                 {t.followed_plan === true && <span className="text-emerald-400" title="Followed plan">✓ plan</span>}
                 {t.followed_plan === false && <span className="text-rose-400" title="Broke plan">✗ plan</span>}
@@ -751,6 +822,8 @@ function Stats({ trades }) {
             ))}
           </div>
           <div className="grid gap-3 lg:grid-cols-2">
+            <StatTable title="Checklist followed?" rows={s.byChecklist} note="Market → sector → leader → level → break → retest → 8/21, ticked at entry." />
+            <StatTable title="Retest vs break entries" rows={s.byEntry} note="Waiting for the retest misses some runners — this shows whether it pays for you." />
             <StatTable title="Did the system agree?" rows={s.bySystem} note="Sector Pulse read saved when each trade was logged." />
             <StatTable title="Risk rules at entry" rows={s.byRules} />
             <StatTable title="By setup" rows={s.bySetup} labelFn={setupLabel} />

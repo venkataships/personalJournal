@@ -93,23 +93,63 @@ export function riskCheck(limits, accountValue, openTrades, closedToday, n) {
 export function pulseContext(snapshot, ticker) {
   if (!snapshot) return null;
   const ctx = { snapshot_as_of: snapshot.as_of, session: snapshot.session, top_setup: false };
+  if (snapshot.market?.state) ctx.market_state = snapshot.market.state;
   const picks = snapshot.setups?.picks || [];
   const i = picks.findIndex((p) => p.ticker === ticker);
   if (i >= 0) Object.assign(ctx, { top_setup: true, setup_rank: i + 1, setup_score: picks[i].score, invalid_below: picks[i].invalid_below });
+  const q = (snapshot.setups?.all || []).find((r) => r.ticker === ticker);
+  if (q && i < 0) Object.assign(ctx, { qualified: true, setup_score: q.score, invalid_below: q.invalid_below });
+  const putTrend = (m) => {
+    for (const k of ['ema_trend', 'retest', 'retest_level']) if (m[k] != null) ctx[k] = m[k];
+  };
   for (const g of snapshot.groups || []) {
     const m = (g.members || []).find((x) => x.ticker === ticker);
     if (m) {
-      return Object.assign(ctx, {
+      Object.assign(ctx, {
         group: g.name, phase: m.quadrant, pd_event: m.pd_event, pd_state: m.pd_state, pdh: m.pdh, rs5: m.rs5,
         sector_etf: g.ref?.symbol, sector_phase: g.ref?.quadrant,
       });
+      putTrend(m);
+      return ctx;
     }
   }
-  if (i >= 0) {
-    const p = picks[i];
+  const p = i >= 0 ? picks[i] : q;
+  if (p) {
     Object.assign(ctx, { group: p.source, phase: p.quadrant, sector_etf: p.sector_etf, sector_phase: p.sector_phase, pdh: p.pdh });
+    putTrend(p);
   }
   return ctx;
+}
+
+// Market -> Sector -> Leader -> Level -> Break -> Retest -> 8/21 (same as journal.prefill_checklist)
+export const CHECKLIST = [
+  { id: 'market', label: 'Market', hint: 'SPY & QQQ trending up (daily 8 EMA over 21)' },
+  { id: 'sector', label: 'Sector', hint: 'Sector ETF leading or improving vs SPY' },
+  { id: 'leader', label: 'Leader', hint: 'The stock itself leading or improving vs SPY' },
+  { id: 'level',  label: 'Level',  hint: 'Marked level with the stop at it' },
+  { id: 'break',  label: 'Break',  hint: 'Broke the level (above PDH) — no break, no trade' },
+  { id: 'retest', label: 'Retest', hint: 'Entered on the pullback to the level that held, not the first push' },
+  { id: 'ema',    label: '8/21',   hint: 'Daily 8 EMA over 21, price above — buyers in control' },
+];
+const STRONG = ['Leading', 'Improving'];
+
+export function prefillChecklist(ctx, stopLoss, direction = 'long') {
+  const c = ctx || {};
+  const out = Object.fromEntries(CHECKLIST.map((x) => [x.id, null]));
+  out.level = stopLoss != null;
+  if (direction === 'short') return out;
+  if (c.market_state) out.market = c.market_state === 'green';
+  if (c.sector_phase) out.sector = STRONG.includes(c.sector_phase);
+  if (c.phase) out.leader = STRONG.includes(c.phase);
+  if (c.pd_state || c.retest) out.break = Boolean(c.retest) || c.pd_state === 'above';
+  if ('ema_trend' in c || 'pd_state' in c) out.retest = Boolean(c.retest);
+  if (c.ema_trend) out.ema = c.ema_trend === 'up';
+  return out;
+}
+
+export function checklistScore(cl) {
+  if (!cl) return null;
+  return CHECKLIST.filter((x) => cl[x.id] === true).length;
 }
 
 export function fmt0(n) {
@@ -174,6 +214,14 @@ export function journalStats(trades, sinceISO) {
     byRules: groupBy((t) => ((t.risk_flags || []).length ? 'Broke a rule at entry' : 'Within limits')),
     byPlan: groupBy((t) => (t.followed_plan == null ? null : t.followed_plan ? 'Followed plan' : 'Broke plan')),
     byState: groupBy((t) => t.emotional_state || null),
+    byChecklist: groupBy((t) => {
+      const n = checklistScore(t.checklist);
+      return n == null ? null : n === 7 ? '7/7 — full checklist' : n >= 5 ? '5–6 of 7' : '4 or fewer';
+    }),
+    byEntry: groupBy((t) => {
+      const c = t.checklist || {};
+      return c.retest === true ? 'Entered on a retest' : c.break === true ? 'Entered on the break' : null;
+    }),
     mistakes: [...mistakes.values()].sort((a, b) => a.pnl - b.pnl),
     discipline: {
       withStop: pct(all.filter((t) => t.stop_loss != null).length, all.length),
