@@ -449,6 +449,7 @@ function PdChip({ m }) {
   const tip = (m.pd_live ? 'Live — provisional until the close. ' : '')
     + `${e.tip ? e.tip + '. ' : ''}PDH ${m.pdh} (${pct(m.dist_pdh)}) · PDL ${m.pdl} (${pct(m.dist_pdl)})`
     + (m.pd_vol_confirmed ? ` · on ${m.rvol}x volume` : '')
+    + (m.above_hi20 ? ` · above the 20-day high ${m.hi20} (${highText(m)})` : m.hi20 ? ` · 20-day high ${m.hi20}` : '')
     + (m.hh_hl_streak ? ` · ${Math.abs(m.hh_hl_streak)} day${Math.abs(m.hh_hl_streak) > 1 ? 's' : ''} of ${m.hh_hl_streak > 0 ? 'higher highs & lows' : 'lower highs & lows'}` : '');
   return (
     <span title={tip} className={`inline-flex items-center gap-1 whitespace-nowrap rounded border px-1.5 py-0.5 text-[11px] ${e.cls} ${m.pd_live ? 'border-dashed' : ''}`}>
@@ -500,6 +501,21 @@ function RetestChip({ m }) {
   return (
     <span title={tip} className={`inline-flex items-center gap-1 whitespace-nowrap rounded border border-emerald-500/50 bg-emerald-500/15 px-1.5 py-0.5 text-[11px] text-emerald-200 ${m.pd_live ? 'border-dashed' : ''}`}>
       <span aria-hidden>{'\u21A9\uFE0E'}</span>Retest
+    </span>
+  );
+}
+
+// Closed above the prior 20 sessions' high — a "major daily level" break.
+function highText(m) {
+  return `${m.high_days}${m.high_days_capped ? '+' : ''}d high`;
+}
+
+function HighChip({ m }) {
+  if (!m.above_hi20) return null;
+  return (
+    <span title={`Above ${m.hi20}, the highest high of the prior 20 sessions — highest price in ${m.high_days}${m.high_days_capped ? '+' : ''} sessions`}
+      className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 text-[11px] text-sky-200">
+      <span aria-hidden>▲</span>{highText(m)}
     </span>
   );
 }
@@ -639,6 +655,7 @@ const QUAL_COLS = [
   { key: 'rs5',      label: 'vs SPY 5d',  num: true, title: 'Points ahead of SPY over 5 days' },
   { key: 'rvol',     label: 'Vol',        num: true, title: 'Volume vs 20-day average' },
   { key: 'dist_pdh', label: 'Above PDH',  num: true, title: 'How far above yesterday\'s high — smaller is a closer entry' },
+  { key: 'high_days', label: 'New high', num: true, title: 'Closed above the 20-day high — highest price in N sessions' },
   { key: 'entry_type', label: 'Entry',   title: 'Retest = broke out, pulled back to the level and held · Break = no retest yet' },
   { key: 'quadrant', label: 'Phase' },
   { key: 'sector',   label: 'Sector ETF' },
@@ -647,7 +664,8 @@ const QUAL_COLS = [
 function QualifiedTable({ rows, inTrade }) {
   const [open, setOpen] = useState(false);
   const [sort, setSort] = useState({ key: 'rank', dir: 1 });
-  const ranked = rows.map((r, i) => ({ ...r, rank: i + 1 }));
+  // high_days only counts when it's an actual new 20-day high (so sorting matches what's shown)
+  const ranked = rows.map((r, i) => ({ ...r, rank: i + 1, high_days: r.above_hi20 ? r.high_days : null }));
 
   // Where the breakouts cluster — the "broader sense" at a glance.
   const byGroup = Object.entries(
@@ -683,7 +701,7 @@ function QualifiedTable({ rows, inTrade }) {
       </button>
       {open && (
         <div className="overflow-x-auto border-t border-neutral-900">
-          <table className="w-full min-w-[800px] text-[12px]">
+          <table className="w-full min-w-[860px] text-[12px]">
             <thead>
               <tr className="text-[10px] uppercase tracking-wider text-neutral-500">
                 {QUAL_COLS.map((c) => (
@@ -717,6 +735,9 @@ function QualifiedTable({ rows, inTrade }) {
                   </td>
                   <td className={`px-2 py-1.5 text-right font-mono tabular-nums ${(r.dist_pdh || 0) > 4 ? 'text-amber-300' : 'text-neutral-300'}`}>
                     {r.dist_pdh != null ? `${r.dist_pdh.toFixed(1)}%` : '—'}
+                  </td>
+                  <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono tabular-nums text-sky-300">
+                    {r.above_hi20 ? highText(r) : <span className="text-neutral-700">—</span>}
                   </td>
                   <td className="px-2 py-1.5">
                     {r.entry_type === 'retest' ? <RetestChip m={r} /> : r.entry_type ? <span className="text-[11px] text-neutral-500">Break</span> : '—'}
@@ -758,7 +779,8 @@ function SetupCard({ p, rank, inTrade }) {
             {p.source}{p.sector_etf ? ` · ${p.sector_etf}` : ''}
           </div>
           {p.entry_type && (
-            <div className="mt-1">
+            <div className="mt-1 flex flex-wrap gap-1">
+              <HighChip m={p} />
               {p.entry_type === 'retest' ? <RetestChip m={p} /> : (
                 <span title="Broke yesterday's high but hasn't pulled back and held yet — the post's rule: wait for the retest"
                   className="inline-flex rounded border border-neutral-700 px-1.5 py-0.5 text-[11px] text-neutral-400">Break only</span>
