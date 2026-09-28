@@ -780,7 +780,7 @@ function SetupCard({ p, rank, inTrade }) {
       </div>
       <div className="mt-1 text-[11px] text-neutral-400">
         Invalid below <span className="font-mono text-neutral-200">{p.invalid_below}</span>
-        <span className="text-neutral-600"> ({p.entry_type === 'retest' ? 'retest level' : 'PDH'})</span>
+        <span className="text-neutral-600"> ({p.entry_type === 'retest' ? 'under the retest' : 'PDH'})</span>
       </div>
       {p.reasons?.length > 0 && (
         <ul className="mt-2 space-y-0.5 text-[11px] text-emerald-300/90">
