@@ -495,12 +495,15 @@ function PdCell({ m }) {
 // Break -> pullback to the level -> held. The entry the checklist waits for.
 function RetestChip({ m }) {
   if (!m.retest) return null;
+  const ib = m.intraday || {};
   const tip = m.retest === 'day2'
     ? `Broke out yesterday, pulled back to ${m.retest_level} today and is holding above it`
-    : `Opened above yesterday's high, pulled back to ${m.retest_level} and is holding above it`;
+    : m.retest === 'intraday'
+      ? `15-min bars: broke ${m.retest_level} at ${ib.break_at}, pulled back to it at ${ib.retest_at} and no 15-min bar has closed below it since`
+      : `Opened above yesterday's high, pulled back to ${m.retest_level} and is holding above it`;
   return (
     <span title={tip} className={`inline-flex items-center gap-1 whitespace-nowrap rounded border border-emerald-500/50 bg-emerald-500/15 px-1.5 py-0.5 text-[11px] text-emerald-200 ${m.pd_live ? 'border-dashed' : ''}`}>
-      <span aria-hidden>{'\u21A9\uFE0E'}</span>Retest
+      <span aria-hidden>{'\u21A9\uFE0E'}</span>Retest{m.retest === 'intraday' && <span className="font-mono text-[9px] opacity-70">15m</span>}
     </span>
   );
 }
