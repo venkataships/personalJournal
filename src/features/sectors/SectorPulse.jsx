@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, createContext, useContext } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft, AlertCircle, RefreshCw, TrendingUp, TrendingDown, Radar,
@@ -11,6 +11,16 @@ import {
 import { supabase, authReady } from '../../lib/supabase';
 import MarketBar from '../../components/MarketBar';
 import { MARKET_TICKERS } from '../../lib/marketTickers';
+import Catalysts, { CatalystChip } from './Catalysts';
+import { rowToCatalyst } from '../../lib/catalysts';
+import { todayET } from '../../lib/journal';
+
+// Catalyst data for the ⚡ tags deep in the cards/tables (avoids prop drilling).
+const CatCtx = createContext(null);
+function CatTag({ ticker }) {
+  const c = useContext(CatCtx);
+  return c ? <CatalystChip ticker={ticker} {...c} /> : null;
+}
 
 // Groups live in Supabase `pulse_groups` (edited here). sector_pulse.py on the
 // bot reads them every run and writes a snapshot to `market_pulse`, which this
@@ -86,7 +96,15 @@ export default function SectorPulse() {
       // Tickers with an open journal trade get an "In trade" tag (non-fatal).
       const openRes = await supabase.from('trade_journal').select('ticker').eq('status', 'open');
       const inTrade = new Set((openRes.data || []).map((t) => (t.ticker || '').toUpperCase()));
-      setState({ loading: false, error: null, row: data, inTrade });
+      // Catalysts + watchlist categories (both optional: page works without them).
+      const [catRes, wlRes] = await Promise.all([
+        supabase.from('catalysts').select('*').eq('is_active', true).gt('expires_at', new Date(Date.now() - 30 * 86400000).toISOString()),
+        supabase.from('watchlist').select('ticker, category').eq('is_active', true),
+      ]);
+      const catalysts = catRes.error ? [] : (catRes.data || []).map(rowToCatalyst);
+      const wlCategory = new Map((wlRes.data || []).filter((w) => w.ticker)
+        .map((w) => [w.ticker.toUpperCase(), (w.category || '').trim().toLowerCase()]));
+      setState({ loading: false, error: null, row: data, inTrade, catalysts, wlCategory });
     } catch (e) {
       setState((s) => ({ ...s, loading: false, error: e.message || 'Failed to load.' }));
     }
@@ -132,6 +150,16 @@ export default function SectorPulse() {
       setRecalc(e.message || 'Recalculate failed.');
     }
   }
+
+  const today = todayET();
+  const catCtx = useMemo(() => (state.catalysts?.length
+    ? { catalysts: state.catalysts, snapshot: state.row, wlCategory: state.wlCategory || new Map(), today }
+    : null), [state.catalysts, state.row, state.wlCategory, today]);
+  const knownTickers = useMemo(() => {
+    const k = new Set(state.wlCategory ? [...state.wlCategory.keys()] : []);
+    for (const g of state.row?.groups || []) for (const m of g.members || []) k.add(m.ticker);
+    return k;
+  }, [state.wlCategory, state.row]);
 
   const row = state.row;
   const groups = row?.groups || [];
@@ -257,6 +285,7 @@ export default function SectorPulse() {
               </section>
             )}
 
+            <CatCtx.Provider value={catCtx}>
             {/* Top setups */}
             {row.setups && <TopSetups setups={row.setups} market={row.risk?.state !== undefined ? row.risk : null} inTrade={state.inTrade} />}
 
@@ -270,6 +299,10 @@ export default function SectorPulse() {
                 No price data for: <span className="font-mono">{missing.join(', ')}</span> — check the symbol.
               </p>
             )}
+
+            <Catalysts catalysts={state.catalysts || []} snapshot={row} known={knownTickers}
+              wlCategory={state.wlCategory || new Map()} today={today} onChange={load} />
+            </CatCtx.Provider>
 
             {/* Rotation map (collapsed by default) */}
             {groups.length > 0 && (
@@ -447,7 +480,7 @@ function GroupCard({ group: g, rank, total, inTrade }) {
               {g.members.map((m) => (
                 <tr key={m.ticker} className="border-t border-neutral-900 hover:bg-neutral-900/40">
                   <td className="pl-4 pr-2 py-2 font-mono font-medium text-neutral-100">
-                    {m.ticker}{inTrade?.has(m.ticker) && <span className="hidden sm:inline"><InTradeTag /></span>}
+                    {m.ticker}{inTrade?.has(m.ticker) && <span className="hidden sm:inline"><InTradeTag /></span>}<CatTag ticker={m.ticker} />
                   </td>
                   <td className="px-2 py-2 text-right font-mono tabular-nums text-neutral-300">{m.price?.toFixed(2)}</td>
                   <td className={`px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.r1)}`}>{pct(m.r1, 2)}</td>
@@ -827,7 +860,7 @@ function QualifiedTable({ rows, inTrade }) {
                   <td className="px-2 py-1.5 font-mono text-neutral-600">{r.rank}</td>
                   <td className="whitespace-nowrap px-2 py-1.5 font-mono font-semibold text-neutral-100">
                     {r.ticker}{r.pd_live && <span className="ml-1 text-neutral-600" title="Live — provisional until the close">~</span>}
-                    {inTrade?.has(r.ticker) && <InTradeTag />}
+                    {inTrade?.has(r.ticker) && <InTradeTag />}<CatTag ticker={r.ticker} />
                     {r.cautions?.length > 0 && <span className="ml-1 font-sans text-amber-300/80">!</span>}
                   </td>
                   <td className="max-w-[120px] truncate px-2 py-1.5 capitalize text-neutral-400">{r.source}</td>
@@ -880,7 +913,7 @@ function SetupCard({ p, rank, inTrade }) {
           <div className="flex items-baseline gap-1.5">
             <span className="font-mono text-[10px] text-neutral-600">#{rank}</span>
             <span className="font-mono text-[15px] font-semibold text-neutral-100">{p.ticker}</span>
-            {inTrade && <InTradeTag />}
+            {inTrade && <InTradeTag />}<CatTag ticker={p.ticker} />
           </div>
           <div className="mt-0.5 truncate text-[11px] capitalize text-neutral-500">
             {p.source}{p.sector_etf ? ` · ${p.sector_etf}` : ''}
