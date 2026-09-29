@@ -10,23 +10,27 @@ import Positions from './features/positions/Positions';
 import Watchlist from './features/watchlist/Watchlist';
 import Intelligence from './features/intelligence/Intelligence';
 import SectorPulse from './features/sectors/SectorPulse';
+import TradingLayout from './components/TradingNav';
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/"               element={<Chooser />} />
-        <Route path="/trading"        element={<TradingHome />} />
         <Route path="/life"           element={<LifeHome />} />
-        <Route path="/dashboard"      element={<DailyDashboard />} />
-        <Route path="/tomorrow-prep"  element={<TomorrowPrep />} />
-        <Route path="/journal"        element={<Journal />} />
-        <Route path="/trade-journal"  element={<Navigate to="/journal" replace />} />
         <Route path="/life-journal"   element={<LifeJournal />} />
-        <Route path="/positions"      element={<Positions />} />
-        <Route path="/watchlist"      element={<Watchlist />} />
-        <Route path="/intelligence"   element={<Intelligence />} />
-        <Route path="/sectors"        element={<SectorPulse />} />
+        <Route path="/trade-journal"  element={<Navigate to="/journal" replace />} />
+        {/* Trading pages share one navigation bar */}
+        <Route element={<TradingLayout />}>
+          <Route path="/trading"        element={<TradingHome />} />
+          <Route path="/dashboard"      element={<DailyDashboard />} />
+          <Route path="/tomorrow-prep"  element={<TomorrowPrep />} />
+          <Route path="/journal"        element={<Journal />} />
+          <Route path="/positions"      element={<Positions />} />
+          <Route path="/watchlist"      element={<Watchlist />} />
+          <Route path="/intelligence"   element={<Intelligence />} />
+          <Route path="/sectors"        element={<SectorPulse />} />
+        </Route>
         <Route path="*"               element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
