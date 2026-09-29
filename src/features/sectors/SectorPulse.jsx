@@ -591,22 +591,81 @@ const GATE = {
   red:     { label: 'Market says wait',  cls: 'border-rose-500/40 bg-rose-500/5',       text: 'text-rose-300' },
 };
 
+const INTRADAY_TEXT = {
+  retest_shaky: (ib) => `15-min: retested at ${ib.retest_at}, but a 15-min bar closed back below`,
+  retest_lost:  (ib) => `15-min: retested at ${ib.retest_at}, now back below the level`,
+  break_only:   (ib) => `15-min: broke at ${ib.break_at}, no pullback to the level yet`,
+  weak_break:   () => '15-min: poked above, never cleared it cleanly',
+};
+
 function MarketGate({ market }) {
   const g = GATE[market?.state];
   if (!g) return null;
-  const effect = market.state === 'red' ? 'Setups shown but scored −15.'
+  const effect = market.state === 'red' ? 'Setups still shown, scored −15.'
     : market.state === 'caution' ? 'Setups scored −5.' : 'Setups scored normally.';
+  const detailed = ['SPY', 'QQQ'].some((sym) => market[sym]?.why || market[sym]?.pdh != null);
   return (
-    <div className={`mb-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-md border px-3 py-2 text-[12px] ${g.cls}`}>
-      <span className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Market gate</span>
-      <span className={`font-medium ${g.text}`}>{g.label}</span>
-      {['SPY', 'QQQ'].map((sym) => market[sym] && (
-        <span key={sym} className="inline-flex items-center gap-1.5">
-          <span className="font-mono text-neutral-200">{sym}</span>
-          <EmaTag m={{ ema_trend: market[sym].trend, ema8: market[sym].ema8, ema21: market[sym].ema21 }} />
+    <div className={`mb-3 overflow-hidden rounded-md border ${g.cls}`}>
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2 text-[12px]">
+        <span className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Market gate</span>
+        <span className={`font-medium ${g.text}`}>{g.label}</span>
+        <span className="text-neutral-400">{market.note}</span>
+        <span className="ml-auto text-neutral-500">{effect}</span>
+      </div>
+      {detailed ? (
+        <div className="grid border-t border-neutral-800/70 sm:grid-cols-2 sm:divide-x sm:divide-neutral-800/70">
+          {['SPY', 'QQQ'].map((sym) => market[sym] && <IndexCard key={sym} sym={sym} m={market[sym]} />)}
+        </div>
+      ) : (
+        <div className="flex gap-4 border-t border-neutral-800/70 px-3 py-2 text-[12px]">
+          {['SPY', 'QQQ'].map((sym) => market[sym] && (
+            <span key={sym} className="inline-flex items-center gap-1.5">
+              <span className="font-mono text-neutral-200">{sym}</span>
+              <EmaTag m={{ ema_trend: market[sym].trend, ema8: market[sym].ema8, ema21: market[sym].ema21 }} />
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// One index in the gate: trend (and why), yesterday's range, break/retest.
+function IndexCard({ sym, m }) {
+  const e = { ...m, ema_trend: m.trend };
+  const ib = m.intraday || {};
+  const ibText = !m.retest && INTRADAY_TEXT[ib.verdict]?.(ib);
+  return (
+    <div className="border-t border-neutral-800/70 px-3 py-2.5 first:border-t-0 sm:border-t-0">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="flex items-baseline gap-2">
+          <span className="font-mono text-[14px] font-semibold text-neutral-100">{sym}</span>
+          <span className="font-mono text-[13px] tabular-nums text-neutral-300">{m.price?.toFixed(2)}</span>
+          <span className={`font-mono text-[12px] tabular-nums ${pctClass(m.r1)}`}>{pct(m.r1, 2)}</span>
         </span>
-      ))}
-      <span className="text-neutral-500">{effect}</span>
+        <span className="flex items-center gap-1.5 text-[11px] text-neutral-500">8/21 <EmaTag m={e} /></span>
+      </div>
+      {m.why && <div className="mt-1 text-[11px] leading-snug text-neutral-400">{m.why}</div>}
+
+      {m.pdh != null && (
+        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[11px]">
+          <PdBar m={m} />
+          <span className="font-mono tabular-nums text-neutral-500">
+            PDL <span className="text-neutral-300">{m.pdl}</span> · PDH <span className="text-neutral-300">{m.pdh}</span>
+          </span>
+          {m.retest ? <RetestChip m={m} /> : <PdChip m={m} />}
+          <HighChip m={m} />
+        </div>
+      )}
+      {m.pdh != null && (
+        <div className="mt-1 font-mono text-[10px] tabular-nums text-neutral-600">
+          {m.day_low != null && m.day_high != null && <>today {m.day_low}–{m.day_high} · </>}
+          {m.dist_pdh != null && <>{pct(m.dist_pdh)} vs PDH · </>}
+          {m.dist_pdl != null && <>{pct(m.dist_pdl)} vs PDL</>}
+          {m.pd_live && <> · live, provisional until the close</>}
+        </div>
+      )}
+      {ibText && <div className="mt-1 text-[11px] text-amber-300/80">{ibText}</div>}
     </div>
   );
 }
