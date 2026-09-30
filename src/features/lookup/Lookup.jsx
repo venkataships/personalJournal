@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Search, AlertCircle } from 'lucide-react';
 import { supabase, authReady } from '../../lib/supabase';
-import { analyze } from '../../lib/technicals';
+import { analyze, mergeLive } from '../../lib/technicals';
 import { rowToCatalyst, whenLabel, daysUntil } from '../../lib/catalysts';
 import { todayET } from '../../lib/journal';
 
@@ -32,13 +32,17 @@ export default function Lookup() {
 
   const load = useCallback(async (t) => {
     try {
-      const res = await fetch(`/api/bars?symbols=${t},SPY`);
+      const [res, qres] = await Promise.all([
+        fetch(`/api/bars?symbols=${t},SPY`),
+        fetch(`/api/quotes?symbols=${t},SPY`).catch(() => null),
+      ]);
       const js = await res.json().catch(() => ({}));
+      const quotes = qres && qres.ok ? await qres.json().catch(() => ({})) : {};
       if (!res.ok) throw new Error(js.error || `HTTP ${res.status}`);
       const bars = js[t];
       if (!Array.isArray(bars)) throw new Error(bars?.error ? `${bars.error} — is ${t} a valid ticker?` : 'No data');
       if (bars.length < 25) throw new Error(`Only ${bars.length} days of history for ${t} — not enough to analyse.`);
-      setSt({ for: t, error: null, bars, spy: Array.isArray(js.SPY) ? js.SPY : [], ctx: null });
+      setSt({ for: t, error: null, bars, spy: Array.isArray(js.SPY) ? js.SPY : [], ctx: null, quotes });
       setRecent((r) => { const next = [t, ...r.filter((x) => x !== t)].slice(0, 8); saveRecent(next); return next; });
       // What the rest of the system knows about it (all optional).
       try {
@@ -55,6 +59,21 @@ export default function Lookup() {
     }
   }, []);
 
+  // Live price every minute while the market is active (pre-market + regular).
+  useEffect(() => {
+    if (!sym || st.for !== sym) return undefined;
+    const id = setInterval(async () => {
+      try {
+        const r = await fetch(`/api/quotes?symbols=${sym},SPY`);
+        if (!r.ok) return;
+        const quotes = await r.json();
+        if (!['premarket', 'regular'].includes(quotes?.[sym]?.session)) return;
+        setSt((s) => (s.for === sym ? { ...s, quotes } : s));
+      } catch { /* keep the last price */ }
+    }, 60 * 1000);
+    return () => clearInterval(id);
+  }, [sym, st.for]);
+
   useEffect(() => {
     if (!sym) return undefined;
     const id = setTimeout(() => load(sym), 0);   // async boundary: state updates happen in a callback
@@ -63,7 +82,14 @@ export default function Lookup() {
 
   const loading = !!sym && st.for !== sym;
   const cur = loading ? {} : st;
-  const a = useMemo(() => (cur.bars ? analyze(cur.bars, cur.spy, n) : null), [cur.bars, cur.spy, n]);
+  const today = todayET();
+  const merged = useMemo(() => {
+    if (!cur.bars) return null;
+    const m = mergeLive(cur.bars, cur.quotes?.[sym], today);
+    const s = mergeLive(cur.spy, cur.quotes?.SPY, today);
+    return { bars: m.bars, spy: s.bars, live: m.live };
+  }, [cur.bars, cur.spy, cur.quotes, sym, today]);
+  const a = useMemo(() => (merged ? analyze(merged.bars, merged.spy, n, { onePrice: !!merged.live?.onePrice }) : null), [merged, n]);
   const go = (t) => { const x = (t || '').trim().toUpperCase().replace(/^\$/, ''); if (x) { setQ(x); nav(`/lookup/${x}`); } };
 
   return (
@@ -102,7 +128,7 @@ export default function Lookup() {
 
         {a && (
           <>
-            <Headline sym={sym} a={a} ctx={cur.ctx} />
+            <Headline sym={sym} a={a} ctx={cur.ctx} live={merged?.live} />
             <Read notes={a.notes} />
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">Daily chart</div>
@@ -113,7 +139,7 @@ export default function Lookup() {
                 ))}
               </div>
             </div>
-            <Chart bars={cur.bars} a={a} />
+            <Chart bars={merged.bars} a={a} />
             <Stats a={a} />
             <Context sym={sym} a={a} ctx={cur.ctx} />
           </>
@@ -127,7 +153,7 @@ function Empty({ children }) {
   return <div className="rounded-md border border-dashed border-neutral-800 px-4 py-8 text-center text-[13px] text-neutral-500">{children}</div>;
 }
 
-function Headline({ sym, a, ctx }) {
+function Headline({ sym, a, ctx, live }) {
   const inTrade = ctx?.trades?.length > 0;
   return (
     <div className="mb-4 flex flex-wrap items-baseline gap-x-5 gap-y-2">
@@ -136,7 +162,12 @@ function Headline({ sym, a, ctx }) {
       {[['1D', a.r1], ['5D', a.r5], ['20D', a.r20], ['60D', a.r60]].map(([k, v]) => (
         <span key={k} className="font-mono text-[13px] tabular-nums"><span className="text-neutral-600">{k} </span><span className={tone(v)}>{sgn(v)}</span></span>
       ))}
-      <span className="text-[11px] text-neutral-600">latest bar {a.date}</span>
+      {live?.provisional ? (
+        <span className="rounded border border-amber-500/40 bg-amber-500/5 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-amber-300"
+          title={live.onePrice ? "Today's bar is just the live price (no high/low yet) — levels use yesterday's range" : "Today's bar is still forming — updates every minute"}>
+          {live.session === 'premarket' ? 'Live · pre-market' : live.session === 'regular' ? 'Live · market open' : 'Latest close'}
+        </span>
+      ) : <span className="text-[11px] text-neutral-600">latest bar {a.date}</span>}
       {inTrade && <Link to="/journal" className="rounded border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-sky-300">In trade</Link>}
     </div>
   );
@@ -288,7 +319,7 @@ function Card({ title, rows, note }) {
 }
 
 const d = (v) => <span className={tone(v)}>{sgn(v)}</span>;
-const PD = { breakout: 'Breakout', breakdown: 'Breakdown', failed_breakout: 'Failed breakout', reclaim: 'Reclaim', outside_day: 'Outside day', inside_day: 'Inside day' };
+const PD = { gap_above: 'Pre-market: above PDH', gap_below: 'Pre-market: below PDL', inside_open: 'Pre-market: inside', breakout: 'Breakout', breakdown: 'Breakdown', failed_breakout: 'Failed breakout', reclaim: 'Reclaim', outside_day: 'Outside day', inside_day: 'Inside day' };
 
 function Stats({ a }) {
   const trend = { up: '▲ up', down: '▼ down', mixed: '~ mixed' }[a.trend] || '—';

@@ -96,7 +96,8 @@ function periodReturn(closes, n) {
   return closes.length > n ? pct(closes.at(-1), closes.at(-1 - n)) : null;
 }
 
-export function analyze(bars, spyBars = [], lookbackN = 20) {
+export function analyze(bars, spyBars = [], lookbackN = 20, opts = {}) {
+  const onePrice = !!opts.onePrice;   // today = a single live price (pre-market): no real high/low yet
   if (!bars || bars.length < 25) return null;
   const closes = bars.map((b) => b.c);
   const last = bars.at(-1); const prev = bars.at(-2);
@@ -117,7 +118,8 @@ export function analyze(bars, spyBars = [], lookbackN = 20) {
   const nLow = Math.min(...prior.map((b) => b.l));
 
   const a14 = atr(bars, 14);
-  const adr = r2(bars.slice(-20).reduce((s, b) => s + (b.h / b.l - 1), 0) / Math.min(20, bars.length) * 100);
+  const rangeBars = onePrice ? bars.slice(-21, -1) : bars.slice(-20);
+  const adr = r2(rangeBars.reduce((s, b) => s + (b.h / b.l - 1), 0) / rangeBars.length * 100);
   const vols = bars.slice(-21, -1).map((b) => b.v).filter(Boolean);
   const avgVol = vols.length ? vols.reduce((s, v) => s + v, 0) / vols.length : null;
   const rvol = avgVol && last.v ? r2(last.v / avgVol) : null;
@@ -140,13 +142,14 @@ export function analyze(bars, spyBars = [], lookbackN = 20) {
   const pdh = prev.h; const pdl = prev.l;
   const pdState = price > pdh ? 'above' : price < pdl ? 'below' : 'inside';
   const tookH = last.h > pdh; const tookL = last.l < pdl;
-  const pdEvent = tookH && tookL ? (pdState === 'above' ? 'breakout' : pdState === 'below' ? 'breakdown' : 'outside_day')
+  const pdEvent = onePrice ? (pdState === 'above' ? 'gap_above' : pdState === 'below' ? 'gap_below' : 'inside_open')
+    : tookH && tookL ? (pdState === 'above' ? 'breakout' : pdState === 'below' ? 'breakdown' : 'outside_day')
     : tookH ? (pdState === 'above' ? 'breakout' : 'failed_breakout')
       : tookL ? (pdState === 'below' ? 'breakdown' : 'reclaim') : 'inside_day';
 
   // EMA pullback read: today's low tagged the 8 or 21 EMA and it closed back above.
   const touched = (e) => e && last.l <= e * 1.005 && price > e;
-  const pullback = touched(ema8) ? '8' : touched(ema21) ? '21' : null;
+  const pullback = onePrice ? null : touched(ema8) ? '8' : touched(ema21) ? '21' : null;
 
   const sw = swings(bars);
   const resistance = sw.highs.filter((s) => s.p > price).sort((a, b) => a.p - b.p)[0] || null;
@@ -165,7 +168,7 @@ export function analyze(bars, spyBars = [], lookbackN = 20) {
     atr: r2(a14), atrPct: a14 ? r2(a14 / price * 100) : null, adr,
     ext21Atr: a14 && ema21 ? r2((price - ema21) / a14) : null,
     rsi: rsi(closes, 14), rvol, upDownVol: dnVol ? r2(upVol / dnVol) : null,
-    streak: hhhlStreak(bars), pullback, resistance, support,
+    streak: hhhlStreak(onePrice ? bars.slice(0, -1) : bars), pullback, onePrice, resistance, support,
     swingHighs: sw.highs.slice(-6), swingLows: sw.lows.slice(-6),
     shortHistory: bars.length < 200,
     series: { e8, e21, s50 },
@@ -215,4 +218,33 @@ export function verdict(t) {
       text: `Risk: ATR ${t.atr} (${t.atrPct}% a day)${stop21 ? `; a stop under the 21 EMA (~${stop21}) is ${r2((t.price - stop21) / t.atr)} ATRs away` : ''}${t.support ? `; nearest swing low ${t.support.p}` : ''}.` });
   }
   return n;
+}
+
+// Fold a live quote (from /api/quotes) into daily bars as a provisional
+// "today" bar, so pre-market / intraday lookups use the current price.
+//   premarket / regular: today's bar = existing partial bar extended by the
+//     live price, or a new one-price bar if Public has none yet.
+//   closed: only append if the bars stop at the session before the quote's
+//     (quote.prevClose matches the last bar) — weekend/holiday-safe.
+export function mergeLive(bars, q, todayISO) {
+  if (!bars?.length || !q?.price) return { bars, live: null };
+  const last = bars.at(-1);
+  const p = q.price;
+  const live = { price: p, changePct: q.changePct ?? null, session: q.session, prevClose: q.prevClose ?? null };
+  if (q.session === 'premarket' || q.session === 'regular') {
+    if (last.d === todayISO) {
+      const bar = { ...last, c: p, h: Math.max(last.h, p), l: Math.min(last.l, p), v: Math.max(last.v || 0, q.volume || 0) };
+      return { bars: [...bars.slice(0, -1), bar], live: { ...live, provisional: true } };
+    }
+    if (last.d < todayISO) {
+      const bar = { d: todayISO, o: p, h: p, l: p, c: p, v: q.session === 'regular' ? (q.volume || 0) : 0 };
+      return { bars: [...bars, bar], live: { ...live, provisional: true, onePrice: true } };
+    }
+    return { bars, live };
+  }
+  // closed: bars already include the latest session?
+  if (q.prevClose && Math.abs(q.prevClose / last.c - 1) < 0.002 && Math.abs(p / last.c - 1) > 1e-6 && last.d < todayISO) {
+    return { bars: [...bars, { d: todayISO, o: p, h: p, l: p, c: p, v: q.volume || 0 }], live: { ...live, provisional: true, onePrice: true } };
+  }
+  return { bars, live };
 }
