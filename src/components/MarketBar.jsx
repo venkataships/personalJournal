@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { MARKET_TICKERS } from '../lib/marketTickers';
+import { supabase, authReady } from '../lib/supabase';
 
 // ---------------------------------------------------------------------------
 // Config — tickers to display and their labels
@@ -73,6 +74,7 @@ export default function MarketBar() {
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [tnx, setTnx] = useState(null);   // { yield, chg_bps, live, as_of } from the latest pulse
   const intervalRef = useRef(null);
 
   const fetchQuotes = useCallback(async () => {
@@ -85,6 +87,12 @@ export default function MarketBar() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setQuotes(data);
+      try {   // 10-year yield rides in the latest pulse snapshot (optional)
+        await authReady();
+        const { data: row } = await supabase.from('market_pulse').select('risk')
+          .order('as_of', { ascending: false }).limit(1).maybeSingle();
+        setTnx(row?.risk?.tnx || null);
+      } catch { /* chip falls back to IEF */ }
       setLastUpdated(new Date());
     } catch (e) {
       setError(e.message);
@@ -94,10 +102,10 @@ export default function MarketBar() {
   }, []);
 
   useEffect(() => {
-    fetchQuotes();
+    const first = setTimeout(fetchQuotes, 0);   // state updates land in a callback, not the effect body
     // Auto-refresh every 5 minutes
     intervalRef.current = setInterval(fetchQuotes, 5 * 60 * 1000);
-    return () => clearInterval(intervalRef.current);
+    return () => { clearTimeout(first); clearInterval(intervalRef.current); };
   }, [fetchQuotes]);
 
   const sentiment = determineSentiment(quotes);
@@ -160,7 +168,8 @@ export default function MarketBar() {
 
         {/* Ticker chips */}
         <div className="flex items-center gap-2 flex-wrap">
-          {MARKET_TICKERS.map(({ symbol, label }) => {
+          {MARKET_TICKERS.map(({ symbol, label, kind }) => {
+            if (kind === 'yield' && tnx?.yield != null) return <YieldChip key={symbol} label={label} t={tnx} />;
             const q = quotes[symbol];
             const pct = q?.changePct ?? null;
             const price = q?.price ?? null;
@@ -177,7 +186,7 @@ export default function MarketBar() {
                 className={`flex items-center gap-1.5 rounded border ${chipColor} bg-neutral-950/60 px-2.5 py-1.5`}
               >
                 <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-neutral-500">
-                  {label}
+                  {kind === 'yield' ? 'IEF bonds' : label}
                 </span>
                 {loading ? (
                   <div className="h-3 w-10 rounded bg-neutral-800 animate-pulse" />
@@ -223,6 +232,28 @@ export default function MarketBar() {
           Price fetch failed: {error}
         </div>
       )}
+    </div>
+  );
+}
+
+// 10-year Treasury yield. Shown in % with the change in basis points; colour is
+// neutral on purpose (a rising yield is "up" but usually a headwind for stocks).
+function YieldChip({ label, t }) {
+  const bps = t.chg_bps;
+  const asOf = t.as_of ? new Date(t.as_of).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
+  const tip = `10-year Treasury yield (CBOE ^TNX), ${t.live ? 'intraday' : 'last close'}${asOf ? `, from the ${asOf} pulse` : ''}. `
+    + 'Rising yields are usually a headwind for growth/tech; falling yields a tailwind.';
+  return (
+    <div title={tip} className="flex items-center gap-1.5 rounded border border-neutral-700 bg-neutral-950/60 px-2.5 py-1.5 text-neutral-200">
+      <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-neutral-500">{label}</span>
+      <span className="font-mono text-[12px] font-semibold tabular-nums">
+        {t.yield.toFixed(3)}%
+        {bps != null && (
+          <span className={`ml-1 text-[11px] font-normal ${bps > 0 ? 'text-amber-300' : bps < 0 ? 'text-sky-300' : 'text-neutral-400'}`}>
+            {bps > 0 ? '▲' : bps < 0 ? '▼' : ''}{Math.abs(bps).toFixed(1)}bp
+          </span>
+        )}
+      </span>
     </div>
   );
 }
