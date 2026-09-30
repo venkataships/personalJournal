@@ -11,6 +11,7 @@ import Watchlist from './features/watchlist/Watchlist';
 import Intelligence from './features/intelligence/Intelligence';
 import SectorPulse from './features/sectors/SectorPulse';
 import TradingLayout from './components/TradingNav';
+import Lookup from './features/lookup/Lookup';
 
 export default function App() {
   return (
@@ -30,6 +31,8 @@ export default function App() {
           <Route path="/watchlist"      element={<Watchlist />} />
           <Route path="/intelligence"   element={<Intelligence />} />
           <Route path="/sectors"        element={<SectorPulse />} />
+          <Route path="/lookup"         element={<Lookup />} />
+          <Route path="/lookup/:symbol" element={<Lookup />} />
         </Route>
         <Route path="*"               element={<Navigate to="/" replace />} />
       </Routes>

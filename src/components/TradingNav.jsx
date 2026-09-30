@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { Home, LayoutDashboard, Radar, Eye, BookText, Briefcase, Brain, Sparkles } from 'lucide-react';
+import { Home, LayoutDashboard, Radar, Eye, BookText, Briefcase, Brain, Sparkles, Search } from 'lucide-react';
 
 // One bar across every trading page. Scrolls sideways on a phone.
 const LINKS = [
@@ -7,6 +7,7 @@ const LINKS = [
   { to: '/dashboard',     label: 'Dashboard',    icon: LayoutDashboard },
   { to: '/sectors',       label: 'Sectors',      icon: Radar },
   { to: '/watchlist',     label: 'Watchlist',    icon: Eye },
+  { to: '/lookup',        label: 'Lookup',       icon: Search },
   { to: '/journal',       label: 'Journal',      icon: BookText },
   { to: '/positions',     label: 'Positions',    icon: Briefcase },
   { to: '/intelligence',  label: 'Intelligence', icon: Brain },

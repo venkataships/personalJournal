@@ -480,7 +480,7 @@ function GroupCard({ group: g, rank, total, inTrade }) {
               {g.members.map((m) => (
                 <tr key={m.ticker} className="border-t border-neutral-900 hover:bg-neutral-900/40">
                   <td className="pl-4 pr-2 py-2 font-mono font-medium text-neutral-100">
-                    {m.ticker}{inTrade?.has(m.ticker) && <span className="hidden sm:inline"><InTradeTag /></span>}<CatTag ticker={m.ticker} />
+                    <Link to={`/lookup/${m.ticker}`} title={`Technicals for ${m.ticker}`} className="hover:text-emerald-300 hover:underline">{m.ticker}</Link>{inTrade?.has(m.ticker) && <span className="hidden sm:inline"><InTradeTag /></span>}<CatTag ticker={m.ticker} />
                   </td>
                   <td className="px-2 py-2 text-right font-mono tabular-nums text-neutral-300">{m.price?.toFixed(2)}</td>
                   <td className={`px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.r1)}`}>{pct(m.r1, 2)}</td>
@@ -859,7 +859,7 @@ function QualifiedTable({ rows, inTrade }) {
                   title={r.cautions?.length ? `! ${r.cautions.join(' · ')}` : undefined}>
                   <td className="px-2 py-1.5 font-mono text-neutral-600">{r.rank}</td>
                   <td className="whitespace-nowrap px-2 py-1.5 font-mono font-semibold text-neutral-100">
-                    {r.ticker}{r.pd_live && <span className="ml-1 text-neutral-600" title="Live — provisional until the close">~</span>}
+                    <Link to={`/lookup/${r.ticker}`} className="hover:text-emerald-300 hover:underline">{r.ticker}</Link>{r.pd_live && <span className="ml-1 text-neutral-600" title="Live — provisional until the close">~</span>}
                     {inTrade?.has(r.ticker) && <InTradeTag />}<CatTag ticker={r.ticker} />
                     {r.cautions?.length > 0 && <span className="ml-1 font-sans text-amber-300/80">!</span>}
                   </td>
@@ -912,7 +912,7 @@ function SetupCard({ p, rank, inTrade }) {
         <div>
           <div className="flex items-baseline gap-1.5">
             <span className="font-mono text-[10px] text-neutral-600">#{rank}</span>
-            <span className="font-mono text-[15px] font-semibold text-neutral-100">{p.ticker}</span>
+            <Link to={`/lookup/${p.ticker}`} title={`Technicals for ${p.ticker}`} className="font-mono text-[15px] font-semibold text-neutral-100 hover:text-emerald-300 hover:underline">{p.ticker}</Link>
             {inTrade && <InTradeTag />}<CatTag ticker={p.ticker} />
           </div>
           <div className="mt-0.5 truncate text-[11px] capitalize text-neutral-500">
