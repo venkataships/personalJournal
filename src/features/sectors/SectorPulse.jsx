@@ -12,6 +12,7 @@ import { supabase, authReady } from '../../lib/supabase';
 import MarketBar from '../../components/MarketBar';
 import { MARKET_TICKERS } from '../../lib/marketTickers';
 import Catalysts, { CatalystChip } from './Catalysts';
+import AiNotes from './AiNotes';
 import { rowToCatalyst } from '../../lib/catalysts';
 import { todayET } from '../../lib/journal';
 
@@ -104,7 +105,15 @@ export default function SectorPulse() {
       const catalysts = catRes.error ? [] : (catRes.data || []).map(rowToCatalyst);
       const wlCategory = new Map((wlRes.data || []).filter((w) => w.ticker)
         .map((w) => [w.ticker.toUpperCase(), (w.category || '').trim().toLowerCase()]));
-      setState({ loading: false, error: null, row: data, inTrade, catalysts, wlCategory });
+      // AI brief + today's event notes (optional: needs migration 010; the bot writes them).
+      const dayStart = new Date(`${todayET()}T00:00:00-04:00`).toISOString();
+      const [briefRes, evRes] = await Promise.all([
+        supabase.from('pulse_notes').select('*').eq('kind', 'brief').order('created_at', { ascending: false }).limit(1).maybeSingle(),
+        supabase.from('pulse_notes').select('*').eq('kind', 'event').gte('created_at', dayStart).order('created_at', { ascending: false }).limit(40),
+      ]);
+      const brief = briefRes.error ? null : briefRes.data;
+      const notes = evRes.error ? [] : (evRes.data || []);
+      setState({ loading: false, error: null, row: data, inTrade, catalysts, wlCategory, brief, notes });
     } catch (e) {
       setState((s) => ({ ...s, loading: false, error: e.message || 'Failed to load.' }));
     }
@@ -251,6 +260,9 @@ export default function SectorPulse() {
 
         {/* Live market bar — same component and tickers as the Watchlist page */}
         <MarketBar />
+
+        {/* AI brief + today's notes (hidden until the bot has written one) */}
+        <AiNotes brief={state.brief} events={state.notes} session={row?.session} />
 
         {editing && (
           <GroupEditor

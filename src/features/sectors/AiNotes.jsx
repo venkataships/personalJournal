@@ -1,0 +1,140 @@
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
+
+// AI brief (top of the Sectors page) + today's event notes.
+// The bot's rules detect the events and compute every number; Claude Haiku
+// writes the words. Notes saved with model 'rules' are the rule-written
+// sentence (used when the AI is unavailable).
+
+const SEV = {
+  3: { label: 'Important', dot: '#e11d48', cls: 'text-rose-300' },
+  2: { label: 'Notable',   dot: '#d97706', cls: 'text-amber-300' },
+  1: { label: 'FYI',       dot: '#737373', cls: 'text-neutral-400' },
+};
+const TYPE_LABEL = {
+  reversal_up: 'Reversal up', reversal_down: 'Fade from high', big_up: 'Big move up', big_down: 'Big move down',
+  premarket_gap: 'Pre-market gap', new_high: 'New high', lost_21ema: 'Lost 21 EMA', retest_held: 'Retest held',
+  sector_hot: 'Sector moving', sector_cold: 'Sector selling',
+};
+const typeLabel = (t) => TYPE_LABEL[t] || (t?.startsWith('gate_') ? 'Market gate' : t || 'Event');
+const hm = (iso) => new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' });
+const minsAgo = (iso) => Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+const agoLabel = (m) => (m < 1 ? 'just now' : m < 90 ? `${m}m ago` : m < 36 * 60 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`);
+const isTicker = (t) => /^[A-Z.]{1,6}$/.test(t || '') && t !== 'MARKET';
+// 'claude-haiku-5-5' -> 'Haiku 5.5'
+const modelName = (m) => {
+  if (!m || m === 'rules') return m || '';
+  const x = /^claude-([a-z]+)-(\d+)-(\d+)/.exec(m);
+  return x ? `${x[1][0].toUpperCase()}${x[1].slice(1)} ${x[2]}.${x[3]}` : m;
+};
+
+export default function AiNotes({ brief, events, session }) {
+  const [open, setOpen] = useState(true);
+  if (!brief && !events?.length) return null;
+  const age = brief ? minsAgo(brief.created_at) : null;
+  const stale = brief && ['premarket', 'regular'].includes(session) && age > 45;
+  const d = brief?.data || {};
+  return (
+    <section className="mb-6">
+      {brief && (
+        <div className="rounded-md border border-neutral-800 bg-neutral-950/50 px-4 py-3">
+          <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+            <span className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-[0.22em] text-neutral-400">
+              <Sparkles className="h-3.5 w-3.5 text-emerald-400" strokeWidth={1.75} /> AI brief
+            </span>
+            <span className={`font-mono text-[11px] ${stale ? 'text-amber-300' : 'text-neutral-600'}`}
+              title="Written by the model from the pulse's numbers. Rules compute the numbers; the model writes the words.">
+              {hm(brief.created_at)} ET · {agoLabel(age)}{stale ? ' · stale' : ''} · {modelName(brief.model)}
+            </span>
+          </div>
+          <div className="text-[15px] font-medium leading-snug text-neutral-100">{brief.title}</div>
+          {brief.body && <p className="mt-1 text-[13px] leading-relaxed text-neutral-300">{brief.body}</p>}
+
+          {(d.hot?.length > 0 || d.weak?.length > 0) && (
+            <div className="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-2">
+              <SectorList title="Hot" mark="▲" cls="text-emerald-300" items={d.hot} />
+              <SectorList title="Weak" mark="▼" cls="text-rose-300" items={d.weak} />
+            </div>
+          )}
+          {d.watch?.length > 0 && (
+            <div className="mt-3">
+              <div className="mb-1 text-[10px] uppercase tracking-[0.16em] text-neutral-500">Watch</div>
+              <ul className="space-y-0.5 text-[12px] text-neutral-300">
+                {d.watch.map((w) => <li key={w} className="flex gap-2"><span className="text-neutral-600">·</span><WatchLine text={w} /></li>)}
+              </ul>
+            </div>
+          )}
+          {d.caution && <div className="mt-2 text-[12px] text-amber-300/90"><span className="font-mono">!</span> {d.caution}</div>}
+        </div>
+      )}
+
+      {events?.length > 0 && (
+        <div className="mt-2 rounded-md border border-neutral-800 bg-neutral-950/40">
+          <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
+            className="flex w-full items-center justify-between px-3 py-2 text-left">
+            <span className="text-[12px] text-neutral-300">Today's notes <span className="font-mono text-neutral-500">{events.length}</span></span>
+            {open ? <ChevronUp className="h-4 w-4 text-neutral-500" /> : <ChevronDown className="h-4 w-4 text-neutral-500" />}
+          </button>
+          {open && (
+            <div className="border-t border-neutral-900">
+              {events.map((e) => <EventRow key={e.id} e={e} />)}
+              <div className="border-t border-neutral-900 px-3 py-1.5 text-[11px] text-neutral-600">
+                Events are detected by rules (moves sized against each stock's own daily range); the model only explains them. It can be wrong — check the level on a chart.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SectorList({ title, mark, cls, items }) {
+  if (!items?.length) return null;
+  return (
+    <div>
+      <div className="mb-1 text-[10px] uppercase tracking-[0.16em] text-neutral-500">{title}</div>
+      <ul className="space-y-1 text-[12px]">
+        {items.map((s) => (
+          <li key={s.name} className="flex gap-2">
+            <span className={`font-mono ${cls}`} aria-hidden>{mark}</span>
+            <span><span className="font-medium capitalize text-neutral-100">{s.name}</span><span className="text-neutral-400"> — {s.why}</span></span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// "MU: holding above 1081 ..." -> ticker links to its Lookup page
+function WatchLine({ text }) {
+  const m = /^([A-Z.]{1,6}):\s*(.*)$/s.exec(text || '');
+  if (!m) return <span>{text}</span>;
+  return <span><Link to={`/lookup/${m[1]}`} className="font-mono font-semibold text-neutral-100 hover:text-emerald-300 hover:underline">{m[1]}</Link>: {m[2]}</span>;
+}
+
+function EventRow({ e }) {
+  const s = SEV[e.severity] || SEV[1];
+  const watch = e.data?.watch;
+  return (
+    <div className="border-b border-neutral-900 px-3 py-2.5 last:border-0">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[11px]">
+        <span className="font-mono tabular-nums text-neutral-500">{hm(e.created_at)}</span>
+        <span className="inline-flex items-center gap-1" title={`${s.label} — ${typeLabel(e.event_type)}`}>
+          <span className="h-1.5 w-1.5 rounded-full" style={{ background: s.dot }} />
+          <span className={s.cls}>{s.label}</span>
+        </span>
+        <span className="rounded border border-neutral-800 px-1.5 py-0.5 text-neutral-400">{typeLabel(e.event_type)}</span>
+        {isTicker(e.ticker)
+          ? <Link to={`/lookup/${e.ticker}`} className="font-mono font-semibold text-neutral-100 hover:text-emerald-300 hover:underline">{e.ticker}</Link>
+          : <span className="font-medium capitalize text-neutral-200">{e.ticker === 'MARKET' ? 'Market' : e.ticker}</span>}
+        {e.data?.facts?.open_trade && <span className="rounded border border-sky-500/40 bg-sky-500/10 px-1 py-0.5 text-[9px] uppercase tracking-wider text-sky-300">In trade</span>}
+        {e.model === 'rules' && <span className="text-neutral-600" title="AI unavailable for this note — showing the rule-written line">rules</span>}
+      </div>
+      <div className="mt-1 text-[13px] font-medium text-neutral-100">{e.title}</div>
+      {e.body && e.body !== e.title && <p className="mt-0.5 text-[12px] leading-relaxed text-neutral-300">{e.body}</p>}
+      {watch && <p className="mt-0.5 text-[12px] text-neutral-400"><span className="text-neutral-500">Watch:</span> {watch}</p>}
+    </div>
+  );
+}
