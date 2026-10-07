@@ -12,6 +12,7 @@ import Intelligence from './features/intelligence/Intelligence';
 import SectorPulse from './features/sectors/SectorPulse';
 import TradingLayout from './components/TradingNav';
 import Lookup from './features/lookup/Lookup';
+import NotesHistory from './features/notes/NotesHistory';
 
 export default function App() {
   return (
@@ -33,6 +34,8 @@ export default function App() {
           <Route path="/sectors"        element={<SectorPulse />} />
           <Route path="/lookup"         element={<Lookup />} />
           <Route path="/lookup/:symbol" element={<Lookup />} />
+          <Route path="/notes"          element={<NotesHistory />} />
+          <Route path="/notes/:day"     element={<NotesHistory />} />
         </Route>
         <Route path="*"               element={<Navigate to="/" replace />} />
       </Routes>

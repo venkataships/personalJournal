@@ -13,6 +13,7 @@ import MarketBar from '../../components/MarketBar';
 import { MARKET_TICKERS } from '../../lib/marketTickers';
 import Catalysts, { CatalystChip } from './Catalysts';
 import AiNotes from './AiNotes';
+import { etDayRange } from '../../lib/notes';
 import { rowToCatalyst } from '../../lib/catalysts';
 import { todayET } from '../../lib/journal';
 
@@ -106,7 +107,7 @@ export default function SectorPulse() {
       const wlCategory = new Map((wlRes.data || []).filter((w) => w.ticker)
         .map((w) => [w.ticker.toUpperCase(), (w.category || '').trim().toLowerCase()]));
       // AI brief + today's event notes (optional: needs migration 010; the bot writes them).
-      const dayStart = new Date(`${todayET()}T00:00:00-04:00`).toISOString();
+      const dayStart = etDayRange(todayET()).start;
       const [briefRes, evRes] = await Promise.all([
         supabase.from('pulse_notes').select('*').eq('kind', 'brief').order('created_at', { ascending: false }).limit(1).maybeSingle(),
         supabase.from('pulse_notes').select('*').eq('kind', 'event').gte('created_at', dayStart).order('created_at', { ascending: false }).limit(40),

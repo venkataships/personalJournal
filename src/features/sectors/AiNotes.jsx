@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
+import { Sparkles, ChevronDown, ChevronUp, History } from 'lucide-react';
+import { etTime as hm, modelName } from '../../lib/notes';
 
 // AI brief (top of the Sectors page) + today's event notes.
 // The bot's rules detect the events and compute every number; Claude Haiku
@@ -18,23 +19,19 @@ const TYPE_LABEL = {
   sector_hot: 'Sector moving', sector_cold: 'Sector selling',
 };
 const typeLabel = (t) => TYPE_LABEL[t] || (t?.startsWith('gate_') ? 'Market gate' : t || 'Event');
-const hm = (iso) => new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' });
 const minsAgo = (iso) => Math.round((Date.now() - new Date(iso).getTime()) / 60000);
 const agoLabel = (m) => (m < 1 ? 'just now' : m < 90 ? `${m}m ago` : m < 36 * 60 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`);
 const isTicker = (t) => /^[A-Z.]{1,6}$/.test(t || '') && t !== 'MARKET';
-// 'claude-haiku-5-5' -> 'Haiku 5.5'
-const modelName = (m) => {
-  if (!m || m === 'rules') return m || '';
-  const x = /^claude-([a-z]+)-(\d+)-(\d+)/.exec(m);
-  return x ? `${x[1][0].toUpperCase()}${x[1].slice(1)} ${x[2]}.${x[3]}` : m;
-};
+// How many of today's notes the Sectors page shows before sending you to the history page.
+const SHOWN_ON_SECTORS = 3;
 
 export default function AiNotes({ brief, events, session }) {
   const [open, setOpen] = useState(true);
   if (!brief && !events?.length) return null;
   const age = brief ? minsAgo(brief.created_at) : null;
   const stale = brief && ['premarket', 'regular'].includes(session) && age > 45;
-  const d = brief?.data || {};
+  const shown = (events || []).slice(0, SHOWN_ON_SECTORS);
+  const more = (events?.length || 0) - shown.length;
   return (
     <section className="mb-6">
       {brief && (
@@ -43,29 +40,18 @@ export default function AiNotes({ brief, events, session }) {
             <span className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-[0.22em] text-neutral-400">
               <Sparkles className="h-3.5 w-3.5 text-emerald-400" strokeWidth={1.75} /> AI brief
             </span>
-            <span className={`font-mono text-[11px] ${stale ? 'text-amber-300' : 'text-neutral-600'}`}
-              title="Written by the model from the pulse's numbers. Rules compute the numbers; the model writes the words.">
-              {hm(brief.created_at)} ET · {agoLabel(age)}{stale ? ' · stale' : ''} · {modelName(brief.model)}
+            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className={`font-mono text-[11px] ${stale ? 'text-amber-300' : 'text-neutral-600'}`}
+                title="Written by the model from the pulse's numbers. Rules compute the numbers; the model writes the words.">
+                {hm(brief.created_at)} ET · {agoLabel(age)}{stale ? ' · stale' : ''} · {modelName(brief.model)}
+              </span>
+              <Link to="/notes" className="inline-flex items-center gap-1 rounded border border-neutral-800 px-2 py-0.5 text-[11px] text-neutral-400 hover:border-emerald-500/40 hover:text-emerald-300"
+                title="Earlier briefs and notes, by day">
+                <History className="h-3 w-3" strokeWidth={1.75} /> Earlier briefs
+              </Link>
             </span>
           </div>
-          <div className="text-[15px] font-medium leading-snug text-neutral-100">{brief.title}</div>
-          {brief.body && <p className="mt-1 text-[13px] leading-relaxed text-neutral-300">{brief.body}</p>}
-
-          {(d.hot?.length > 0 || d.weak?.length > 0) && (
-            <div className="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-2">
-              <SectorList title="Hot" mark="▲" cls="text-emerald-300" items={d.hot} />
-              <SectorList title="Weak" mark="▼" cls="text-rose-300" items={d.weak} />
-            </div>
-          )}
-          {d.watch?.length > 0 && (
-            <div className="mt-3">
-              <div className="mb-1 text-[10px] uppercase tracking-[0.16em] text-neutral-500">Watch</div>
-              <ul className="space-y-0.5 text-[12px] text-neutral-300">
-                {d.watch.map((w) => <li key={w} className="flex gap-2"><span className="text-neutral-600">·</span><WatchLine text={w} /></li>)}
-              </ul>
-            </div>
-          )}
-          {d.caution && <div className="mt-2 text-[12px] text-amber-300/90"><span className="font-mono">!</span> {d.caution}</div>}
+          <BriefBody brief={brief} />
         </div>
       )}
 
@@ -73,20 +59,49 @@ export default function AiNotes({ brief, events, session }) {
         <div className="mt-2 rounded-md border border-neutral-800 bg-neutral-950/40">
           <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
             className="flex w-full items-center justify-between px-3 py-2 text-left">
-            <span className="text-[12px] text-neutral-300">Today's notes <span className="font-mono text-neutral-500">{events.length}</span></span>
+            <span className="text-[12px] text-neutral-300">Latest notes <span className="font-mono text-neutral-500">{shown.length} of {events.length} today</span></span>
             {open ? <ChevronUp className="h-4 w-4 text-neutral-500" /> : <ChevronDown className="h-4 w-4 text-neutral-500" />}
           </button>
           {open && (
             <div className="border-t border-neutral-900">
-              {events.map((e) => <EventRow key={e.id} e={e} />)}
-              <div className="border-t border-neutral-900 px-3 py-1.5 text-[11px] text-neutral-600">
-                Events are detected by rules (moves sized against each stock's own daily range); the model only explains them. It can be wrong — check the level on a chart.
-              </div>
+              {shown.map((e) => <EventRow key={e.id} e={e} />)}
+              <Link to="/notes" className="block border-t border-neutral-900 px-3 py-2 text-center text-[12px] text-neutral-400 hover:text-emerald-300">
+                {more > 0 ? `${more} more today · ` : ''}All notes and earlier days →
+              </Link>
             </div>
           )}
         </div>
       )}
+      {!brief && events?.length > 0 && (
+        <Link to="/notes" className="mt-1.5 inline-block text-[11px] text-neutral-500 hover:text-emerald-300">Earlier briefs and notes →</Link>
+      )}
     </section>
+  );
+}
+
+// Headline, summary, hot/weak sectors, watch list, caution — shared with the history page.
+export function BriefBody({ brief, compact }) {
+  const d = brief?.data || {};
+  return (
+    <>
+      <div className={`${compact ? 'text-[14px]' : 'text-[15px]'} font-medium leading-snug text-neutral-100`}>{brief.title}</div>
+      {brief.body && <p className="mt-1 text-[13px] leading-relaxed text-neutral-300">{brief.body}</p>}
+      {(d.hot?.length > 0 || d.weak?.length > 0) && (
+        <div className="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-2">
+          <SectorList title="Hot" mark="▲" cls="text-emerald-300" items={d.hot} />
+          <SectorList title="Weak" mark="▼" cls="text-rose-300" items={d.weak} />
+        </div>
+      )}
+      {d.watch?.length > 0 && (
+        <div className="mt-3">
+          <div className="mb-1 text-[10px] uppercase tracking-[0.16em] text-neutral-500">Watch</div>
+          <ul className="space-y-0.5 text-[12px] text-neutral-300">
+            {d.watch.map((w) => <li key={w} className="flex gap-2"><span className="text-neutral-600">·</span><WatchLine text={w} /></li>)}
+          </ul>
+        </div>
+      )}
+      {d.caution && <div className="mt-2 text-[12px] text-amber-300/90"><span className="font-mono">!</span> {d.caution}</div>}
+    </>
   );
 }
 
@@ -114,7 +129,7 @@ function WatchLine({ text }) {
   return <span><Link to={`/lookup/${m[1]}`} className="font-mono font-semibold text-neutral-100 hover:text-emerald-300 hover:underline">{m[1]}</Link>: {m[2]}</span>;
 }
 
-function EventRow({ e }) {
+export function EventRow({ e }) {
   const s = SEV[e.severity] || SEV[1];
   const watch = e.data?.watch;
   return (

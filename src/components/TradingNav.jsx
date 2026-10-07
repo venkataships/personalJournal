@@ -1,5 +1,6 @@
-import { NavLink, Outlet } from 'react-router-dom';
-import { Home, LayoutDashboard, Radar, Eye, BookText, Briefcase, Brain, Sparkles, Search } from 'lucide-react';
+import { useEffect } from 'react';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { Home, LayoutDashboard, Radar, Eye, BookText, Briefcase, Brain, Sparkles, Search, History } from 'lucide-react';
 
 // One bar across every trading page. Scrolls sideways on a phone.
 const LINKS = [
@@ -8,6 +9,7 @@ const LINKS = [
   { to: '/sectors',       label: 'Sectors',      icon: Radar },
   { to: '/watchlist',     label: 'Watchlist',    icon: Eye },
   { to: '/lookup',        label: 'Lookup',       icon: Search },
+  { to: '/notes',         label: 'AI notes',     icon: History },
   { to: '/journal',       label: 'Journal',      icon: BookText },
   { to: '/positions',     label: 'Positions',    icon: Briefcase },
   { to: '/intelligence',  label: 'Intelligence', icon: Brain },
@@ -33,6 +35,9 @@ export function TradingNav() {
 }
 
 export default function TradingLayout() {
+  // A new page starts at the top (links deep in one page used to open the next one scrolled down).
+  const { pathname } = useLocation();
+  useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
   return (
     <div className="min-h-screen bg-[#0a0a0a]">
       <TradingNav />
