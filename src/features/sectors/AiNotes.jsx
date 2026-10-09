@@ -31,6 +31,7 @@ export default function AiNotes({ brief, events, session }) {
   const age = brief ? minsAgo(brief.created_at) : null;
   const stale = brief && ['premarket', 'regular'].includes(session) && age > 45;
   const shown = (events || []).slice(0, SHOWN_ON_SECTORS);
+  const aiOff = events?.[0]?.model === 'rules' ? (events[0].data?.ai || 'unknown reason') : null;
   const more = (events?.length || 0) - shown.length;
   return (
     <section className="mb-6">
@@ -55,6 +56,14 @@ export default function AiNotes({ brief, events, session }) {
         </div>
       )}
 
+      {aiOff && (
+        <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] text-amber-200/90">
+          AI write-ups are off — notes below are the rules' plain text. Reason from the bot: <span className="font-mono">{aiOff}</span>
+          {/ANTHROPIC_API_KEY/.test(aiOff) && ' — add the key to the server .env and restart.'}
+          {/budget/.test(aiOff) && ' — resets tomorrow, or raise PULSE_AI_DAILY_BUDGET.'}
+          {/credit|billing|balance|402|400|401|403/i.test(aiOff) && ' — check API credits / key in the Anthropic Console.'}
+        </div>
+      )}
       {events?.length > 0 && (
         <div className="mt-2 rounded-md border border-neutral-800 bg-neutral-950/40">
           <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
@@ -84,8 +93,35 @@ export function BriefBody({ brief, compact }) {
   const d = brief?.data || {};
   return (
     <>
-      <div className={`${compact ? 'text-[14px]' : 'text-[15px]'} font-medium leading-snug text-neutral-100`}>{brief.title}</div>
+      <div className="flex flex-wrap items-start gap-2">
+        {d.stance?.label && <StanceChip stance={d.stance} />}
+        <div className={`${compact ? 'text-[14px]' : 'text-[15px]'} min-w-0 flex-1 font-medium leading-snug text-neutral-100`}>{brief.title}</div>
+      </div>
       {brief.body && <p className="mt-1 text-[13px] leading-relaxed text-neutral-300">{brief.body}</p>}
+      {d.holdings?.length > 0 && (
+        <div className="mt-3 rounded border border-sky-500/20 bg-sky-500/[0.04] px-3 py-2">
+          <div className="mb-1 text-[10px] uppercase tracking-[0.16em] text-sky-300/80">Your positions</div>
+          <ul className="space-y-0.5 text-[12px] text-neutral-300">
+            {d.holdings.map((h) => (
+              <li key={h.t} className="flex gap-2">
+                <span className={`font-mono ${/breach/i.test(h.status || '') ? 'text-rose-300' : 'text-neutral-600'}`}>{/breach/i.test(h.status || '') ? '!' : '·'}</span>
+                <span><TickerLink t={h.t} />: {h.status}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {d.opportunities?.length > 0 && (
+        <div className="mt-3">
+          <div className="mb-1 text-[10px] uppercase tracking-[0.16em] text-neutral-500">Worth a look</div>
+          <ul className="space-y-0.5 text-[12px] text-neutral-300">
+            {d.opportunities.map((o) => (
+              <li key={o.t} className="flex gap-2"><span className="font-mono text-emerald-400/80">+</span>
+                <span><TickerLink t={o.t} /> — {o.why}{o.level && <span className="text-neutral-500"> · must hold {o.level}</span>}</span></li>
+            ))}
+          </ul>
+        </div>
+      )}
       {(d.hot?.length > 0 || d.weak?.length > 0) && (
         <div className="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-2">
           <SectorList title="Hot" mark="▲" cls="text-emerald-300" items={d.hot} />
@@ -104,6 +140,29 @@ export function BriefBody({ brief, compact }) {
     </>
   );
 }
+
+const STANCE = {
+  defensive:    'border-rose-500/40 bg-rose-500/10 text-rose-200',
+  selective:    'border-amber-500/40 bg-amber-500/10 text-amber-200',
+  constructive: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200',
+};
+function StanceChip({ stance }) {
+  const k = String(stance.label).toLowerCase().trim();
+  return (
+    <span title={stance.why || undefined}
+      className={`mt-0.5 shrink-0 rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-[0.14em] ${STANCE[k] || 'border-neutral-700 text-neutral-300'}`}>
+      {stance.label}
+    </span>
+  );
+}
+
+function TickerLink({ t }) {
+  return /^[A-Z.]{1,6}$/.test(t || '')
+    ? <Link to={`/lookup/${t}`} className="font-mono font-semibold text-neutral-100 hover:text-emerald-300 hover:underline">{t}</Link>
+    : <span className="font-medium text-neutral-100">{t}</span>;
+}
+
+const MOVE_IS = { 'market-wide': 'Market-wide', 'sector-wide': 'Sector-wide', 'stock-specific': 'Stock-specific' };
 
 function SectorList({ title, mark, cls, items }) {
   if (!items?.length) return null;
@@ -145,10 +204,16 @@ export function EventRow({ e }) {
           ? <Link to={`/lookup/${e.ticker}`} className="font-mono font-semibold text-neutral-100 hover:text-emerald-300 hover:underline">{e.ticker}</Link>
           : <span className="font-medium capitalize text-neutral-200">{e.ticker === 'MARKET' ? 'Market' : e.ticker}</span>}
         {e.data?.facts?.open_trade && <span className="rounded border border-sky-500/40 bg-sky-500/10 px-1 py-0.5 text-[9px] uppercase tracking-wider text-sky-300">In trade</span>}
-        {e.model === 'rules' && <span className="text-neutral-600" title="AI unavailable for this note — showing the rule-written line">rules</span>}
+        {e.data?.move_is && <span className="rounded border border-neutral-800 px-1.5 py-0.5 text-neutral-500" title="From today's numbers: stock vs SPY vs its sector">{MOVE_IS[e.data.move_is] || e.data.move_is}</span>}
+        {e.model === 'rules' && (
+          <span className="text-neutral-600 underline decoration-dotted underline-offset-2"
+            title={`Written by the rules, not the AI${e.data?.ai ? ` — AI off: ${e.data.ai}` : ''}`}>rules</span>
+        )}
       </div>
       <div className="mt-1 text-[13px] font-medium text-neutral-100">{e.title}</div>
       {e.body && e.body !== e.title && <p className="mt-0.5 text-[12px] leading-relaxed text-neutral-300">{e.body}</p>}
+      {e.data?.position && <p className="mt-0.5 text-[12px] text-sky-200/90"><span className="text-sky-300/70">Your position:</span> {e.data.position}</p>}
+      {e.data?.opportunity && <p className="mt-0.5 text-[12px] text-emerald-200/90"><span className="text-emerald-300/70">Worth a look:</span> {e.data.opportunity}</p>}
       {watch && <p className="mt-0.5 text-[12px] text-neutral-400"><span className="text-neutral-500">Watch:</span> {watch}</p>}
     </div>
   );
