@@ -2,6 +2,8 @@
 // Same definitions as the bot where they overlap (8/21 trend, phase vs SPY,
 // PDH/PDL, HH/HL streak), so the Lookup page and the Sectors page agree.
 
+import { deterioration } from './deterioration';
+
 const r2 = (n) => (n == null || !Number.isFinite(n) ? null : Math.round(n * 100) / 100);
 const pct = (a, b) => (a != null && b ? r2((a / b - 1) * 100) : null);
 
@@ -98,6 +100,7 @@ function periodReturn(closes, n) {
 
 export function analyze(bars, spyBars = [], lookbackN = 20, opts = {}) {
   const onePrice = !!opts.onePrice;   // today = a single live price (pre-market): no real high/low yet
+  const provisional = !!opts.provisional;   // today's bar is still forming (live quote merged in)
   if (!bars || bars.length < 25) return null;
   const closes = bars.map((b) => b.c);
   const last = bars.at(-1); const prev = bars.at(-2);
@@ -155,8 +158,12 @@ export function analyze(bars, spyBars = [], lookbackN = 20, opts = {}) {
   const resistance = sw.highs.filter((s) => s.p > price).sort((a, b) => a.p - b.p)[0] || null;
   const support = sw.lows.filter((s) => s.p < price).sort((a, b) => b.p - a.p)[0] || null;
 
+  // Same inputs as the bot: completed sessions + the live price while today's bar is forming.
+  const done = provisional ? bars.slice(0, -1) : bars;
+  const det = deterioration(done.map((b) => ({ close: b.c, high: b.h, low: b.l, volume: b.v })), price);
+
   const out = {
-    date: last.d, price: r2(price), ...ret, rel,
+    date: last.d, det, price: r2(price), ...ret, rel,
     ema8: r2(ema8), ema21: r2(ema21), sma50: r2(sma50), sma200: r2(sma200),
     dist8: pct(price, ema8), dist21: pct(price, ema21), dist50: pct(price, sma50), dist200: pct(price, sma200),
     trend: emaTrend(price, ema8, ema21), ema21Slope, golden: sma50 && sma200 ? sma50 > sma200 : null,
@@ -176,6 +183,11 @@ export function analyze(bars, spyBars = [], lookbackN = 20, opts = {}) {
   out.notes = verdict(out);
   return out;
 }
+
+const DET_SHORT = {
+  lower_highs_lows: 'lower highs & lows', declining_emas: 'declining 8/21', failed_ema_bounce: 'failed EMA bounce',
+  low_volume_bounces: 'low-volume bounces', resistance_defended: 'sellers at resistance',
+};
 
 // Plain-English read, one line per question a swing trader asks.
 export function verdict(t) {
@@ -210,6 +222,13 @@ export function verdict(t) {
   if (t.aboveNHigh) n.push({ k: 'level', tone: 'good', text: `Above its ${t.lookbackN}-day high (${t.nHigh}) — a range breakout.` });
   else if (t.fromNHigh != null && t.fromNHigh > -3) n.push({ k: 'level', tone: 'neutral', text: `${Math.abs(t.fromNHigh)}% under its ${t.lookbackN}-day high (${t.nHigh}) — the level to break.` });
   if (t.belowNLow) n.push({ k: 'level', tone: 'bad', text: `Below its ${t.lookbackN}-day low (${t.nLow}) — range breakdown.` });
+  if (t.det) {
+    const names = t.det.signs.map((s) => DET_SHORT[s]).join(', ');
+    n.push({ k: 'det', tone: t.det.score >= 3 ? 'bad' : t.det.score === 2 ? 'warn' : 'good',
+      text: t.det.score >= 3 ? `Deterioration ${t.det.score}/5 — the right side is failing (${names}). Strength is no longer the reason to hold.`
+        : t.det.score === 2 ? `Deterioration 2/5 — watch: ${names}. One more sign makes it a failing chart.`
+          : `Deterioration ${t.det.score}/5 — structure intact${names ? ` (only: ${names})` : ''}. Don't fade it for looking stretched.` });
+  }
   if (t.pullback) n.push({ k: 'pb', tone: 'good', text: `Pullback: today's low tagged the ${t.pullback} EMA and it closed back above — the EMA-pullback entry.` });
   if (t.from52h != null && t.from52h > -5) n.push({ k: '52', tone: 'good', text: `Within ${Math.abs(t.from52h)}% of its 52-week high (${t.hi52}).` });
   if (t.atr) {

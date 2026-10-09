@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DET_SIGNS, DET_LABELS } from '../../lib/deterioration';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Search, AlertCircle } from 'lucide-react';
 import { supabase, authReady } from '../../lib/supabase';
@@ -89,7 +90,7 @@ export default function Lookup() {
     const s = mergeLive(cur.spy, cur.quotes?.SPY, today);
     return { bars: m.bars, spy: s.bars, live: m.live };
   }, [cur.bars, cur.spy, cur.quotes, sym, today]);
-  const a = useMemo(() => (merged ? analyze(merged.bars, merged.spy, n, { onePrice: !!merged.live?.onePrice }) : null), [merged, n]);
+  const a = useMemo(() => (merged ? analyze(merged.bars, merged.spy, n, { onePrice: !!merged.live?.onePrice, provisional: !!merged.live?.provisional }) : null), [merged, n]);
   const go = (t) => { const x = (t || '').trim().toUpperCase().replace(/^\$/, ''); if (x) { setQ(x); nav(`/lookup/${x}`); } };
 
   return (
@@ -362,6 +363,10 @@ function Stats({ a }) {
         ['20 days', <span key="20" className={tone(a.rel.rs20)}>{a.rel.rs20 > 0 ? '+' : ''}{fmt(a.rel.rs20)} pts</span>],
         ['60 days', <span key="60" className={tone(a.rel.rs60)}>{a.rel.rs60 > 0 ? '+' : ''}{fmt(a.rel.rs60)} pts</span>],
       ] : [['SPY data', 'unavailable']]} note="Stock % minus SPY % — same phase rule as Sector Pulse." />
+      <Card title="Deterioration (0–5)" rows={a.det ? [
+        ['Score', <span key="s" className={a.det.score >= 3 ? 'text-rose-300' : a.det.score === 2 ? 'text-amber-300' : 'text-emerald-300'}>{a.det.score}/5 · {a.det.label}</span>],
+        ...DET_SIGNS.map((k) => [DET_LABELS[k], a.det.detail[k] ? <span key={k} className="text-rose-300" title={a.det.detail[k]}>yes</span> : <span key={k} className="text-neutral-600">no</span>]),
+      ] : [['Data', 'needs 31+ sessions']]} note={a.det ? (a.det.signs.map((k) => a.det.detail[k]).join(' · ') || 'No signs — trend structure intact.') : null} />
       <Card title="Swing levels (last ~90 days)" rows={[
         ['Nearest resistance', a.resistance ? fmt(a.resistance.p) : 'none above', a.resistance ? <span key="r" className="text-neutral-500">{a.resistance.d.slice(5)}</span> : null],
         ['Nearest support', a.support ? fmt(a.support.p) : 'none below', a.support ? <span key="s" className="text-neutral-500">{a.support.d.slice(5)}</span> : null],

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, createContext, useContext } from 'react';
+import DetChip from '../../components/DetChip';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft, AlertCircle, RefreshCw, TrendingUp, TrendingDown, Radar,
@@ -493,7 +494,7 @@ function GroupCard({ group: g, rank, total, inTrade }) {
               {g.members.map((m) => (
                 <tr key={m.ticker} className="border-t border-neutral-900 hover:bg-neutral-900/40">
                   <td className="pl-4 pr-2 py-2 font-mono font-medium text-neutral-100">
-                    <Link to={`/lookup/${m.ticker}`} title={`Technicals for ${m.ticker}`} className="hover:text-emerald-300 hover:underline">{m.ticker}</Link>{inTrade?.has(m.ticker) && <span className="hidden sm:inline"><InTradeTag /></span>}<CatTag ticker={m.ticker} />
+                    <Link to={`/lookup/${m.ticker}`} title={`Technicals for ${m.ticker}`} className="hover:text-emerald-300 hover:underline">{m.ticker}</Link>{inTrade?.has(m.ticker) && <span className="hidden sm:inline"><InTradeTag /></span>}<CatTag ticker={m.ticker} />{m.deterioration?.score >= 2 && <span className="ml-1.5 align-middle"><DetChip d={m.deterioration} compact /></span>}
                   </td>
                   <td className="px-2 py-2 text-right font-mono tabular-nums text-neutral-300">{m.price?.toFixed(2)}</td>
                   <td className={`px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.r1)}`}>{pct(m.r1, 2)}</td>
@@ -701,6 +702,7 @@ function IndexCard({ sym, m }) {
           </span>
           {m.retest ? <RetestChip m={m} /> : <PdChip m={m} />}
           <HighChip m={m} />
+          <DetChip d={m.deterioration} />
         </div>
       )}
       {m.pdh != null && (
@@ -740,6 +742,7 @@ function SectorStrip({ g }) {
           <span className="text-neutral-500">{r.above_ema20 ? 'above' : 'below'} 20-day avg</span>
         )}
         <RetestChip m={r} />
+        <DetChip d={r.deterioration} />
       </div>
       {verdict && (
         <div className="font-mono tabular-nums text-neutral-400" title="Median of your picks minus the ETF's return">
@@ -809,6 +812,7 @@ const QUAL_COLS = [
   { key: 'rvol',     label: 'Vol',        num: true, title: 'Volume vs 20-day average' },
   { key: 'dist_pdh', label: 'Above PDH',  num: true, title: 'How far above yesterday\'s high — smaller is a closer entry' },
   { key: 'high_days', label: 'New high', num: true, title: 'Closed above the 20-day high — highest price in N sessions' },
+  { key: 'det',      label: 'Det',        num: true, title: 'Deterioration 0-5 (lower highs/lows, declining 8/21, failed EMA bounce, low-volume bounces, sellers at resistance) — hover a cell' },
   { key: 'entry_type', label: 'Entry',   title: 'Retest = broke out, pulled back to the level and held · Break = no retest yet' },
   { key: 'quadrant', label: 'Phase' },
   { key: 'sector',   label: 'Sector ETF' },
@@ -818,7 +822,7 @@ function QualifiedTable({ rows, inTrade }) {
   const [open, setOpen] = useState(false);
   const [sort, setSort] = useState({ key: 'rank', dir: 1 });
   // high_days only counts when it's an actual new 20-day high (so sorting matches what's shown)
-  const ranked = rows.map((r, i) => ({ ...r, rank: i + 1, high_days: r.above_hi20 ? r.high_days : null }));
+  const ranked = rows.map((r, i) => ({ ...r, rank: i + 1, high_days: r.above_hi20 ? r.high_days : null, det: r.deterioration?.score ?? null }));
 
   // Where the breakouts cluster — the "broader sense" at a glance.
   const byGroup = Object.entries(
@@ -854,7 +858,7 @@ function QualifiedTable({ rows, inTrade }) {
       </button>
       {open && (
         <div className="overflow-x-auto border-t border-neutral-900">
-          <table className="w-full min-w-[860px] text-[12px]">
+          <table className="w-full min-w-[910px] text-[12px]">
             <thead>
               <tr className="text-[10px] uppercase tracking-wider text-neutral-500">
                 {QUAL_COLS.map((c) => (
@@ -891,6 +895,9 @@ function QualifiedTable({ rows, inTrade }) {
                   </td>
                   <td className="whitespace-nowrap px-2 py-1.5 text-right font-mono tabular-nums text-sky-300">
                     {r.above_hi20 ? highText(r) : <span className="text-neutral-700">—</span>}
+                  </td>
+                  <td className="px-2 py-1.5 text-right">
+                    {r.det == null ? <span className="text-neutral-700">—</span> : <DetChip d={r.deterioration} always compact />}
                   </td>
                   <td className="px-2 py-1.5">
                     {r.entry_type === 'retest' ? <RetestChip m={r} /> : r.entry_type ? <span className="text-[11px] text-neutral-500">Break</span> : '—'}
@@ -934,6 +941,7 @@ function SetupCard({ p, rank, inTrade }) {
           {p.entry_type && (
             <div className="mt-1 flex flex-wrap gap-1">
               <HighChip m={p} />
+              <DetChip d={p.deterioration} />
               {p.entry_type === 'retest' ? <RetestChip m={p} /> : (
                 <span title="Broke yesterday's high but hasn't pulled back and held yet — the post's rule: wait for the retest"
                   className="inline-flex rounded border border-neutral-700 px-1.5 py-0.5 text-[11px] text-neutral-400">Break only</span>
