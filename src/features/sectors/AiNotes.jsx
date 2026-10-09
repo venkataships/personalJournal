@@ -31,7 +31,11 @@ export default function AiNotes({ brief, events, session }) {
   const age = brief ? minsAgo(brief.created_at) : null;
   const stale = brief && ['premarket', 'regular'].includes(session) && age > 45;
   const shown = (events || []).slice(0, SHOWN_ON_SECTORS);
-  const aiOff = events?.[0]?.model === 'rules' ? (events[0].data?.ai || 'unknown reason') : null;
+  // AI-off banner only while the newest note is rule-written AND no AI brief has been written since
+  // (otherwise an old failure keeps showing after the key is fixed).
+  const lastRules = events?.[0]?.model === 'rules' ? events[0] : null;
+  const aiSince = brief && brief.model !== 'rules' && lastRules && new Date(brief.created_at) > new Date(lastRules.created_at);
+  const aiOff = lastRules && !aiSince ? (lastRules.data?.ai || 'unknown reason') : null;
   const more = (events?.length || 0) - shown.length;
   return (
     <section className="mb-6">
@@ -58,7 +62,7 @@ export default function AiNotes({ brief, events, session }) {
 
       {aiOff && (
         <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] text-amber-200/90">
-          AI write-ups are off — notes below are the rules' plain text. Reason from the bot: <span className="font-mono">{aiOff}</span>
+          AI write-ups were off at {hm(lastRules.created_at)} — that note is the rules' plain text. Reason from the bot: <span className="font-mono">{aiOff}</span>
           {/ANTHROPIC_API_KEY/.test(aiOff) && ' — add the key to the server .env and restart.'}
           {/budget/.test(aiOff) && ' — resets tomorrow, or raise PULSE_AI_DAILY_BUDGET.'}
           {/credit|billing|balance|402|400|401|403/i.test(aiOff) && ' — check API credits / key in the Anthropic Console.'}
