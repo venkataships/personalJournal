@@ -5,7 +5,8 @@ import { Search, AlertCircle } from 'lucide-react';
 import { supabase, authReady } from '../../lib/supabase';
 import { analyze, mergeLive } from '../../lib/technicals';
 import { rowToCatalyst, whenLabel, daysUntil } from '../../lib/catalysts';
-import { todayET } from '../../lib/journal';
+import { todayET, DEFAULT_LIMITS } from '../../lib/journal';
+import PlanTrade from './PlanTrade';
 
 // Pick any ticker: trend, EMAs, 52-week and N-day range, volatility, momentum,
 // strength vs SPY, swing levels, and what the pulse / catalysts / journal know.
@@ -48,12 +49,20 @@ export default function Lookup() {
       // What the rest of the system knows about it (all optional).
       try {
         await authReady();
-        const [snap, cats, trades] = await Promise.all([
-          supabase.from('market_pulse').select('as_of, groups, setups').order('as_of', { ascending: false }).limit(1).maybeSingle(),
+        const [snap, cats, open, closed, lim] = await Promise.all([
+          supabase.from('market_pulse').select('as_of, groups, setups, risk').order('as_of', { ascending: false }).limit(1).maybeSingle(),
           supabase.from('catalysts').select('*').eq('is_active', true),
-          supabase.from('trade_journal').select('id, ticker, entry_price, stop_loss, quantity, status').eq('status', 'open').eq('ticker', t),
+          supabase.from('trade_journal').select('id, ticker, instrument, entry_price, stop_loss, quantity, position_size, status').eq('status', 'open'),
+          supabase.from('trade_journal').select('pnl').eq('exit_date', todayET()),
+          supabase.from('risk_limits').select('*').eq('id', 1).maybeSingle(),
         ]);
-        setSt((s) => (s.for !== t ? s : { ...s, ctx: { snap: snap.data, catalysts: (cats.data || []).map(rowToCatalyst), trades: trades.data || [] } }));
+        const openAll = open.data || [];
+        setSt((s) => (s.for !== t ? s : { ...s, ctx: {
+          snap: snap.data, catalysts: (cats.data || []).map(rowToCatalyst),
+          trades: openAll.filter((x) => x.ticker === t), openAll,
+          realizedToday: (closed.data || []).reduce((sum, x) => sum + (Number(x.pnl) || 0), 0),
+          limits: lim.data ? { ...DEFAULT_LIMITS, ...lim.data } : DEFAULT_LIMITS,
+        } }));
       } catch { /* context is a bonus */ }
     } catch (e) {
       setSt({ for: t, error: e.message || 'Failed to load', bars: null, spy: null, ctx: null });
@@ -141,6 +150,7 @@ export default function Lookup() {
               </div>
             </div>
             <Chart bars={merged.bars} a={a} />
+            <PlanTrade key={sym} sym={sym} a={a} ctx={cur.ctx} />
             <Stats a={a} />
             <Context sym={sym} a={a} ctx={cur.ctx} />
           </>

@@ -353,10 +353,10 @@ function ChecklistChip({ cl }) {
 function LogForm({ params, limits, acct, open, closedToday, snapshot, onCancel, onSaved }) {
   const [f, setF] = useState(() => ({
     direction: params.get('dir') === 'short' ? 'short' : 'long',
-    instrument: 'stock',
+    instrument: params.get('instrument') === 'option' ? 'option' : 'stock',
     ticker: (params.get('ticker') || '').toUpperCase(),
-    option_desc: '',
-    quantity: '',
+    option_desc: params.get('option') || '',
+    quantity: params.get('qty') || '',
     entry: params.get('price') || '',
     stop: params.get('stop') || '',
     setup: params.get('setup') || null,
