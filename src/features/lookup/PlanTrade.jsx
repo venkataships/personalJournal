@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import HelpLink from '../../components/HelpLink';
 import { Link } from 'react-router-dom';
 import { Calculator, AlertTriangle, Loader2 } from 'lucide-react';
 import { stopCandidates, defaultStop, conditions, conditionMult, sizeStock, pickCalls, sizeOption } from '../../lib/sizing';
@@ -57,7 +58,7 @@ export default function PlanTrade({ sym, a, ctx }) {
     <section className="mb-5 rounded-md border border-neutral-800 bg-neutral-950/50">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-900 px-4 py-2.5">
         <h2 className="flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-neutral-300">
-          <Calculator className="h-3.5 w-3.5 text-emerald-400" strokeWidth={1.75} /> Plan a trade — how much
+          <Calculator className="h-3.5 w-3.5 text-emerald-400" strokeWidth={1.75} /> Plan a trade — how much <HelpLink to="plan" />
         </h2>
         <div className="flex rounded border border-neutral-800 p-0.5 text-[11px]">
           {[['stock', 'Shares'], ['options', 'Options']].map(([k, l]) => (

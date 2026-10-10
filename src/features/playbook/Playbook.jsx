@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import HelpLink from '../../components/HelpLink';
 import { Link } from 'react-router-dom';
 import { BookMarked, AlertCircle, Loader2, Check, X, Archive, RotateCcw, Pencil, Plus, ChevronDown, ChevronUp } from 'lucide-react';
 import { supabase, authReady } from '../../lib/supabase';
@@ -69,7 +70,7 @@ export default function Playbook() {
       <div className="mx-auto max-w-4xl px-4 py-8 sm:px-8">
         <header className="mb-5">
           <h1 className="flex items-center gap-2.5 text-3xl font-light tracking-tight text-neutral-100">
-            <BookMarked className="h-6 w-6 text-emerald-400" strokeWidth={1.5} /> Playbook
+            <BookMarked className="h-6 w-6 text-emerald-400" strokeWidth={1.5} /> Playbook <HelpLink to="playbook" />
           </h1>
           <p className="mt-1 text-[13px] leading-relaxed text-neutral-500">
             Paste a market take you trust. The AI pulls out the durable principles as a draft; you edit and approve.

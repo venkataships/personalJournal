@@ -14,6 +14,7 @@ import TradingLayout from './components/TradingNav';
 import Lookup from './features/lookup/Lookup';
 import NotesHistory from './features/notes/NotesHistory';
 import Playbook from './features/playbook/Playbook';
+import Guide from './features/guide/Guide';
 
 export default function App() {
   return (
@@ -38,6 +39,7 @@ export default function App() {
           <Route path="/notes"          element={<NotesHistory />} />
           <Route path="/notes/:day"     element={<NotesHistory />} />
           <Route path="/playbook"       element={<Playbook />} />
+          <Route path="/guide"          element={<Guide />} />
         </Route>
         <Route path="*"               element={<Navigate to="/" replace />} />
       </Routes>

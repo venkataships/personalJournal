@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, createContext, useContext } from 'react';
+import HelpLink from '../../components/HelpLink';
 import DetChip from '../../components/DetChip';
 import { Link } from 'react-router-dom';
 import {
@@ -656,7 +657,7 @@ function MarketGate({ market }) {
   return (
     <div className={`mb-3 overflow-hidden rounded-md border ${g.cls}`}>
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2 text-[12px]">
-        <span className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Market gate</span>
+        <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.18em] text-neutral-500">Market gate <HelpLink to="gate" /></span>
         <span className={`font-medium ${g.text}`}>{g.label}</span>
         <span className="text-neutral-400">{market.note}</span>
         <span className="ml-auto text-neutral-500">{effect}</span>
@@ -780,7 +781,7 @@ function TopSetups({ setups, market, inTrade }) {
       <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
         <div>
           <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-400" title={SETUP_RULES}>
-            Top setups <span className="normal-case tracking-normal text-neutral-600">ⓘ</span>
+            Top setups <span className="normal-case tracking-normal"><HelpLink to="setups" label="How setups are scored" /></span>
           </div>
           <div className="mt-0.5 text-[12px] text-neutral-600">
             {picks.length} shown · {setups.qualified} qualified of {setups.scanned} scanned (watchlist + groups)

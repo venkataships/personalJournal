@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import HelpLink from '../../components/HelpLink';
 import { Link } from 'react-router-dom';
 import { Sparkles, ChevronDown, ChevronUp, History } from 'lucide-react';
 import { etTime as hm, modelName } from '../../lib/notes';
@@ -60,7 +61,7 @@ export default function AiNotes({ brief, events, session }) {
         <div className="rounded-md border border-neutral-800 bg-neutral-950/50 px-4 py-3">
           <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
             <span className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-[0.22em] text-neutral-400">
-              <Sparkles className="h-3.5 w-3.5 text-emerald-400" strokeWidth={1.75} /> AI brief
+              <Sparkles className="h-3.5 w-3.5 text-emerald-400" strokeWidth={1.75} /> AI brief <HelpLink to="ai-notes" />
             </span>
             <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <span className={`font-mono text-[11px] ${stale ? 'text-amber-300' : 'text-neutral-600'}`}
