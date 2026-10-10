@@ -25,8 +25,25 @@ const isTicker = (t) => /^[A-Z.]{1,6}$/.test(t || '') && t !== 'MARKET';
 // How many of today's notes the Sectors page shows before sending you to the history page.
 const SHOWN_ON_SECTORS = 3;
 
+// Collapsed/expanded is remembered per browser (default: minimized — headline only).
+const PREF_KEY = 'sectors.ai.open';
+const readPref = () => { try { return { brief: false, notes: false, ...JSON.parse(localStorage.getItem(PREF_KEY) || '{}') }; } catch { return { brief: false, notes: false }; } };
+const savePref = (p) => { try { localStorage.setItem(PREF_KEY, JSON.stringify(p)); } catch { /* optional */ } };
+
+function briefCounts(d = {}) {
+  return [
+    d.holdings?.length && `${d.holdings.length} on your positions`,
+    d.opportunities?.length && `${d.opportunities.length} opportunit${d.opportunities.length > 1 ? 'ies' : 'y'}`,
+    d.watch?.length && `${d.watch.length} to watch`,
+    d.caution && 'caution',
+  ].filter(Boolean).join(' · ');
+}
+
 export default function AiNotes({ brief, events, session }) {
-  const [open, setOpen] = useState(true);
+  const [pref, setPref] = useState(readPref);
+  const toggle = (k) => setPref((p) => { const next = { ...p, [k]: !p[k] }; savePref(next); return next; });
+  const open = pref.notes;
+  const setOpen = () => toggle('notes');
   if (!brief && !events?.length) return null;
   const age = brief ? minsAgo(brief.created_at) : null;
   const stale = brief && ['premarket', 'regular'].includes(session) && age > 45;
@@ -56,7 +73,16 @@ export default function AiNotes({ brief, events, session }) {
               </Link>
             </span>
           </div>
-          <BriefBody brief={brief} />
+          {pref.brief ? <BriefBody brief={brief} /> : (
+            <div className="flex flex-wrap items-start gap-2">
+              {brief.data?.stance?.label && <StanceChip stance={brief.data.stance} />}
+              <div className="min-w-0 flex-1 text-[15px] font-medium leading-snug text-neutral-100">{brief.title}</div>
+            </div>
+          )}
+          <button type="button" onClick={() => toggle('brief')} aria-expanded={pref.brief}
+            className="mt-2 inline-flex items-center gap-1 text-[11px] text-neutral-500 hover:text-emerald-300">
+            {pref.brief ? <><ChevronUp className="h-3.5 w-3.5" /> Minimize</> : <><ChevronDown className="h-3.5 w-3.5" /> Full brief{briefCounts(brief.data) ? ` — ${briefCounts(brief.data)}` : ''}</>}
+          </button>
         </div>
       )}
 
@@ -70,7 +96,7 @@ export default function AiNotes({ brief, events, session }) {
       )}
       {events?.length > 0 && (
         <div className="mt-2 rounded-md border border-neutral-800 bg-neutral-950/40">
-          <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
+          <button type="button" onClick={setOpen} aria-expanded={open}
             className="flex w-full items-center justify-between px-3 py-2 text-left">
             <span className="text-[12px] text-neutral-300">Latest notes <span className="font-mono text-neutral-500">{shown.length} of {events.length} today</span></span>
             {open ? <ChevronUp className="h-4 w-4 text-neutral-500" /> : <ChevronDown className="h-4 w-4 text-neutral-500" />}
