@@ -470,12 +470,12 @@ function GroupCard({ group: g, rank, total, inTrade }) {
               <col className="w-[17%] sm:w-[7%]" />
               <col className="hidden sm:table-column sm:w-[7%]" />
               <col className="hidden sm:table-column sm:w-[7%]" />
-              <col className="hidden sm:table-column sm:w-[8%]" />
-              <col className="w-[25%] sm:w-[23%]" />
-              <col className="w-[22%] sm:w-[13%]" />
+              <col className="hidden sm:table-column sm:w-[9%]" />
+              <col className="w-[25%] sm:w-[19%]" />
+              <col className="w-[22%] sm:w-[12%]" />
               <col className="hidden sm:table-column sm:w-[5%]" />
-              <col className="hidden sm:table-column sm:w-[6%]" />
               <col className="hidden sm:table-column sm:w-[7%]" />
+              <col className="hidden sm:table-column sm:w-[10%]" />
             </colgroup>
             <thead>
               <tr className="text-left text-[10px] uppercase tracking-wider text-neutral-600">
@@ -484,7 +484,7 @@ function GroupCard({ group: g, rank, total, inTrade }) {
                 <th className="px-2 py-2 text-right font-normal">1d</th>
                 <th className="hidden sm:table-cell px-2 py-2 text-right font-normal">5d</th>
                 <th className="hidden sm:table-cell px-2 py-2 text-right font-normal">20d</th>
-                <th className="hidden sm:table-cell px-2 py-2 text-right font-normal" title="5-day return minus SPY's">vs SPY 5d</th>
+                <th className="hidden sm:table-cell whitespace-nowrap px-2 py-2 text-right font-normal" title="5-day return minus SPY's">vs SPY 5d</th>
                 <th className="pl-3 pr-2 py-2 font-normal" title="Price vs the previous day's high (PDH) and low (PDL)">vs PDH/PDL</th>
                 <th className="pl-2 pr-2 py-2 font-normal">Phase</th>
                 <th className="hidden sm:table-cell px-1 py-2 text-center font-normal" title="Daily 8 EMA vs 21 EMA — ▲ 8 over 21 and price above (buyers in control) · ▼ sellers in control · ~ mixed">8/21</th>
@@ -507,7 +507,7 @@ function GroupCard({ group: g, rank, total, inTrade }) {
                   <td className="whitespace-nowrap pl-2 pr-2 py-2"><QuadrantChip q={m.quadrant} compact note={m.phase_note} /></td>
                   <td className="hidden sm:table-cell px-1 py-2 text-center"><EmaTag m={m} compact /></td>
                   <td className="hidden sm:table-cell px-2 py-2 text-center">{m.deterioration?.score >= 2 ? <DetChip d={m.deterioration} compact /> : <span className="text-neutral-700">—</span>}</td>
-                  <td className="hidden sm:table-cell pr-4 py-2"><FlowTag flow={m.flow} rvol={m.rvol} /></td>
+                  <td className="hidden sm:table-cell whitespace-nowrap pl-2 pr-4 py-2"><FlowTag flow={m.flow} rvol={m.rvol} /></td>
                 </tr>
               ))}
             </tbody>
