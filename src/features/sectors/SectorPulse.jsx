@@ -466,15 +466,16 @@ function GroupCard({ group: g, rank, total, inTrade }) {
           <table className="w-full table-fixed text-[12px]">
             <colgroup>
               <col className="w-[17%] sm:w-[9%]" />
-              <col className="w-[19%] sm:w-[10%]" />
-              <col className="w-[17%] sm:w-[8%]" />
+              <col className="w-[19%] sm:w-[8%]" />
+              <col className="w-[17%] sm:w-[7%]" />
+              <col className="hidden sm:table-column sm:w-[7%]" />
+              <col className="hidden sm:table-column sm:w-[7%]" />
               <col className="hidden sm:table-column sm:w-[8%]" />
-              <col className="hidden sm:table-column sm:w-[8%]" />
-              <col className="hidden sm:table-column sm:w-[9%]" />
-              <col className="w-[25%] sm:w-[22%]" />
+              <col className="w-[25%] sm:w-[23%]" />
               <col className="w-[22%] sm:w-[13%]" />
               <col className="hidden sm:table-column sm:w-[5%]" />
-              <col className="hidden sm:table-column sm:w-[8%]" />
+              <col className="hidden sm:table-column sm:w-[6%]" />
+              <col className="hidden sm:table-column sm:w-[7%]" />
             </colgroup>
             <thead>
               <tr className="text-left text-[10px] uppercase tracking-wider text-neutral-600">
@@ -487,23 +488,25 @@ function GroupCard({ group: g, rank, total, inTrade }) {
                 <th className="pl-3 pr-2 py-2 font-normal" title="Price vs the previous day's high (PDH) and low (PDL)">vs PDH/PDL</th>
                 <th className="pl-2 pr-2 py-2 font-normal">Phase</th>
                 <th className="hidden sm:table-cell px-1 py-2 text-center font-normal" title="Daily 8 EMA vs 21 EMA — ▲ 8 over 21 and price above (buyers in control) · ▼ sellers in control · ~ mixed">8/21</th>
+                <th className="hidden sm:table-cell px-2 py-2 text-center font-normal" title="Deterioration 0-5 — shown at 2+ (hover for the signs)">Det</th>
                 <th className="hidden sm:table-cell pr-4 py-2 font-normal" title="Volume vs 20-day average">Vol</th>
               </tr>
             </thead>
             <tbody>
               {g.members.map((m) => (
                 <tr key={m.ticker} className="border-t border-neutral-900 hover:bg-neutral-900/40">
-                  <td className="pl-4 pr-2 py-2 font-mono font-medium text-neutral-100">
-                    <Link to={`/lookup/${m.ticker}`} title={`Technicals for ${m.ticker}`} className="hover:text-emerald-300 hover:underline">{m.ticker}</Link>{inTrade?.has(m.ticker) && <span className="hidden sm:inline"><InTradeTag /></span>}<CatTag ticker={m.ticker} />{m.deterioration?.score >= 2 && <span className="ml-1.5 align-middle"><DetChip d={m.deterioration} compact /></span>}
+                  <td className="whitespace-nowrap pl-4 pr-2 py-2 font-mono font-medium text-neutral-100">
+                    <Link to={`/lookup/${m.ticker}`} title={`Technicals for ${m.ticker}`} className="hover:text-emerald-300 hover:underline">{m.ticker}</Link>{inTrade?.has(m.ticker) && <span className="hidden sm:inline"><InTradeTag /></span>}<CatTag ticker={m.ticker} />
                   </td>
                   <td className="px-2 py-2 text-right font-mono tabular-nums text-neutral-300">{m.price?.toFixed(2)}</td>
                   <td className={`px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.r1)}`}>{pct(m.r1, 2)}</td>
                   <td className={`hidden sm:table-cell px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.r5)}`}>{pct(m.r5)}</td>
                   <td className={`hidden sm:table-cell px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.r20)}`}>{pct(m.r20)}</td>
                   <td className={`hidden sm:table-cell px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.rs5)}`}>{pct(m.rs5)}</td>
-                  <td className="pl-3 pr-2 py-2"><PdCell m={m} /></td>
-                  <td className="pl-2 pr-2 py-2"><QuadrantChip q={m.quadrant} compact note={m.phase_note} /></td>
+                  <td className="whitespace-nowrap pl-3 pr-4 py-2"><PdCell m={m} /></td>
+                  <td className="whitespace-nowrap pl-2 pr-2 py-2"><QuadrantChip q={m.quadrant} compact note={m.phase_note} /></td>
                   <td className="hidden sm:table-cell px-1 py-2 text-center"><EmaTag m={m} compact /></td>
+                  <td className="hidden sm:table-cell px-2 py-2 text-center">{m.deterioration?.score >= 2 ? <DetChip d={m.deterioration} compact /> : <span className="text-neutral-700">—</span>}</td>
                   <td className="hidden sm:table-cell pr-4 py-2"><FlowTag flow={m.flow} rvol={m.rvol} /></td>
                 </tr>
               ))}
@@ -572,7 +575,6 @@ function PdCell({ m }) {
   if (!m.pd_state) return <span className="text-neutral-700">—</span>;
   return (
     <div className="flex items-center gap-2">
-      <span className="hidden sm:inline-flex"><PdBar m={m} /></span>
       {m.retest ? <RetestChip m={m} /> : <PdChip m={m} />}
       {m.hh_hl_streak >= 2 && (
         <span className="hidden sm:inline font-mono text-[10px] text-emerald-500" title={`${m.hh_hl_streak} days of higher highs & higher lows`}>↗{m.hh_hl_streak}d</span>
