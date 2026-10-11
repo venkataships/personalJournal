@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { processStats, RULESET } from '../../lib/journal';
 import { Link } from 'react-router-dom';
 import {
   Sunrise,
@@ -92,9 +93,11 @@ export default function TradingHome() {
     (async () => {
       try {
         await authReady();
-        const [checkinRes, openTradesRes] = await Promise.all([
+        const [checkinRes, openTradesRes, closedRes] = await Promise.all([
           supabase.from('daily_checkins').select('*').eq('date', dateKey).maybeSingle(),
           supabase.from('trade_journal').select('*', { count: 'exact', head: true }).eq('status', 'open'),
+          supabase.from('trade_journal').select('status, followed_plan, closed_at, exit_date')
+            .in('status', ['closed', 'stopped_out', 'partial']).order('closed_at', { ascending: false }).limit(200),
         ]);
         if (checkinRes.error) throw checkinRes.error;
         if (openTradesRes.error) throw openTradesRes.error;
@@ -109,6 +112,7 @@ export default function TradingHome() {
           intention: ci?.intention || '',
           checkInsCompleted: completed,
           openTradesCount: openTradesRes.count ?? 0,
+          process: processStats(closedRes.data || [], 20),
         });
       } catch (e) {
         if (!cancelled) {
@@ -176,6 +180,19 @@ export default function TradingHome() {
         </header>
 
         {/* Portfolio + status */}
+        <Link to="/journal"
+          className="group mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-emerald-500/25 bg-emerald-500/[0.03] px-5 py-3.5 hover:border-emerald-500/40 transition-all">
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.22em] text-emerald-400/80">Process · rules {RULESET}</div>
+            <div className="mt-1 text-[13px] text-neutral-300">
+              {data.loading || !data.process ? '—' : data.process.n === 0
+                ? 'No reviewed trades yet — judge each one by whether you followed the plan.'
+                : <><span className="font-mono text-neutral-100">{data.process.followed}/{data.process.n}</span> recent trades by plan · <span className="font-mono text-neutral-100">{data.process.streak}</span> in a row</>}
+            </div>
+          </div>
+          <span className="text-[11px] text-neutral-500 group-hover:text-emerald-400">Your job today: execute the plan →</span>
+        </Link>
+
         <Link
           to="/dashboard"
           className="group block rounded-md border border-neutral-800 bg-neutral-950/40 px-5 py-5 mb-8 hover:border-emerald-500/40 hover:bg-neutral-900/50 transition-all"

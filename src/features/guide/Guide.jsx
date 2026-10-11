@@ -7,12 +7,13 @@ import { Compass } from 'lucide-react';
 // src/lib/sizing.js, src/lib/journal.js). Change a rule → change it here in the same commit.
 
 const TOC = [
-  ['Start here', [['overview', 'What this is'], ['flow', 'How data moves'], ['day', 'Your day']]],
+  ['Start here', [['overview', 'What this is'], ['zone', 'Trading in the zone'], ['flow', 'How data moves'], ['day', 'Your day']]],
   ['Pages', [['sectors', 'Sectors'], ['lookup', 'Lookup'], ['plan', 'Plan a trade'], ['ai-notes', 'AI notes'],
     ['playbook', 'Playbook'], ['journal', 'Journal'], ['watchlist', 'Watchlist'], ['other-pages', 'Home, Dashboard, Positions, Intelligence, Prep']]],
   ['Rules', [['pdh', 'PDH / PDL events'], ['retest', 'Retest'], ['ema', '8/21 trend'], ['phase', 'Phase vs SPY'], ['gate', 'Market gate'],
     ['setups', 'Top Setups score'], ['det', 'Deterioration'], ['volume', 'Volume & streaks'], ['events', 'Event rules'],
-    ['sizing', 'Sizing multipliers'], ['limits', 'Risk limits'], ['checklist', 'Journal checklist']]],
+    ['sizing', 'Sizing multipliers'], ['limits', 'Risk limits'], ['checklist', 'Journal checklist'],
+    ['exit-plan', 'Exit plans'], ['tilt', 'Tilt guards'], ['edge', 'Process & edge'], ['track', 'Top Setups track record'], ['freeze', 'Rules v1 & the monthly review']]],
   ['Honesty', [['limits-of', 'What it can’t tell you']]],
 ];
 
@@ -58,6 +59,18 @@ export default function Guide() {
             <P>Three parts: a <B>bot</B> on a Google Cloud server (Python, runs the numbers and the Telegram commands), <B>Supabase</B> (the database everything reads and writes), and this <B>dashboard</B> (Vercel).</P>
           </S>
 
+          <S id="zone" title="Trading in the zone">
+            <P>Built around Mark Douglas’s idea that consistency comes from thinking in probabilities: <B>anything can happen on the next trade; an edge only shows over many trades; your job is to execute, not to predict.</B> In the system that means:</P>
+            <Defs items={[
+              ['Know your risk first', <>Stop required; <A to="plan">Plan a trade</A> shows the dollar loss before you buy.</>],
+              ['Decide the exit before entry', <>Every trade carries an <A to="exit-plan">exit plan</A> — trim, trail, time stop — chosen when you log it, not in the moment.</>],
+              ['Watch the emotions', <>You tag how you feel at entry and why you exited; <A to="tilt">tilt guards</A> catch revenge and euphoria patterns from your own journal.</>],
+              ['Judge the process', <>The Journal and Home lead with “trades by plan” and a streak. P&L sits below, on purpose. A loss taken by the plan is a good trade.</>],
+              ['Measure the edge, don’t assume it', <>Expectancy over the last 20/50 plan-following trades, with how uncertain it still is — and an independent <A to="track">track record</A> of the Top Setups score.</>],
+              ['Same rules in all conditions', <>Rules are versioned and <A to="freeze">frozen</A> between monthly reviews, so the stats measure one system.</>],
+            ]} />
+          </S>
+
           <S id="flow" title="How data moves">
             <Flow steps={[
               ['Prices', 'Public: live quotes and 15-min bars. Yahoo: daily history (cached).'],
@@ -75,8 +88,8 @@ export default function Guide() {
               ['9:30–10:00', <>Don’t act on the first push. Breakouts on Top Setups show as “Break only” until they pull back; ~ means provisional until the close. Options spreads are widest now.</>],
               ['~10:00–11:00', <>The 15-min retest check has data. Pick from Top Setups with a <B>held retest</B>, open the ticker in Lookup, size it in <A to="plan">Plan a trade</A>, then <B>Log trade</B>.</>],
               ['Midday', <>AI notes flag big moves on your open trades and groups. Check at set times (say 10:30, 1:00, 3:30) — the system doesn’t need watching.</>],
-              ['Close', <>Journal: close trades, fill the review. The checklist score and R go into your stats.</>],
-              ['Weekend', <>Journal stats (by checklist score, retest vs break). Study traders’ rules → <L to="/playbook">Playbook</L>.</>],
+              ['Close', <>Journal: each open trade shows its exit plan and whether a rule is triggered (trim zone, time stop). Close what the plan says to close — pick <B>why</B> you exited — and review.</>],
+              ['Weekend', <>Process score and streak first, then the Edge panel and the Top Setups track record. Study traders’ rules → <L to="/playbook">Playbook</L>, but rule changes wait for the monthly review.</>],
             ]} />
           </S>
 
@@ -143,7 +156,9 @@ export default function Guide() {
             <Defs items={[
               ['Log', 'Every trade is checked against your limits at entry; any rule broken needs a written reason and is flagged. The Sector Pulse read at that moment is saved with the trade.'],
               ['Checklist', <>7 items, pre-filled from the pulse where the data answers it; you tick the rest. <A to="checklist">Items</A></>],
-              ['Close + review', 'Exit, P&L and R (P&L ÷ risk at entry). Stops hit are marked stopped out.'],
+              ['Exit plan + feeling', <>Required at entry: an <A to="exit-plan">exit plan</A> and how you feel. <A to="tilt">Tilt guards</A> ask for a reason, like limit breaches.</>],
+              ['Close + review', 'Exit, P&L and R (P&L ÷ risk at entry), and why you exited. Exiting by the plan pre-fills “followed plan”; an emotional exit pre-fills “no” — you can change either.'],
+              ['Process / Edge', <>Top of the page: trades by plan and streak. Below the trades: the <A to="edge">Edge panel</A> and the <A to="track">Top Setups track record</A>, then results.</>],
               ['Stats', 'By setup, by checklist score, retest vs break entries, rule breaks — this is where you learn whether the process has an edge.'],
             ]} />
           </S>
@@ -294,9 +309,51 @@ export default function Guide() {
             ]} />
           </S>
 
+          <S id="exit-plan" title="Exit plans">
+            <P>Chosen when you log the trade. Fear (exiting early) and hope (holding losers) live in exit decisions — deciding them in advance takes them out of the moment.</P>
+            <Table head={['Preset', 'Trim', 'Rest exits on', 'Time stop']} rows={[
+              ['Standard swing', '⅓ at 2R', 'daily close under the 21 EMA', '5 sessions if not +1R'],
+              ['Fast momentum', '⅓ at 2R', 'daily close under the 8 EMA', '3 sessions if not +1R'],
+              ['Let it run', '⅓ at 3R', 'daily close under the 21 EMA', '7 sessions if not +1R'],
+              ['Custom', 'any R', '8 EMA / 21 EMA / none', 'any'],
+            ]} />
+            <P>R = entry − stop. The stop is always −1R. Open trades show “Trim zone”, “Time stop” or “At the stop” when a rule triggers; the AI notes also say when price is under the trail EMA (the trail fires on a daily <B>close</B>, not intraday). The plan isn’t editable mid-trade — trades logged before v1 can get one once, in Details. Telegram /log uses Standard swing.</P>
+            <P>Exit reasons: <B>Stop hit, Trailing rule, Trim/target, Time stop, Setup invalidated</B> are the plan working. <B>Got out early (fear), Held past stop (hope), Impulse</B> are the emotions — the stats show what each costs.</P>
+          </S>
+
+          <S id="tilt" title="Tilt guards">
+            <P>Checked when you log a trade (dashboard and Telegram). Each needs a written reason, and it stays on the record.</P>
+            <Defs items={[
+              ['Cool-off', 'A losing trade closed less than 30 minutes ago.'],
+              ['Re-entry', 'The same ticker already lost you money today.'],
+              ['Two losses', 'Two or more losing trades today.'],
+              ['Size after a loss', 'Your last closed trade lost, and this position is over 125% of your average size across the last 10 trades.'],
+              ['Feeling', 'You tagged FOMO, Frustrated or Euphoric.'],
+            ]} />
+          </S>
+
+          <S id="edge" title="Process & edge">
+            <Defs items={[
+              ['Process', 'Of your last 20 reviewed trades, how many followed the plan; the current and best streak of plan-following trades in a row.'],
+              ['Edge sample', 'Closed trades with an R, followed the plan, under the current ruleset. Last 20 or last 50.'],
+              ['Expectancy', 'Average R per trade, losses included. +0.3R means about $0.30 made per $1 risked, on average.'],
+              ['Likely range', 'Expectancy ± 1.96 standard errors. If the range includes zero, the edge isn’t proven either way yet.'],
+              ['Verdicts', 'Under 20 trades: too few. Range above zero: positive. Range below zero: negative — the rules need work (at the review). Otherwise: unclear.'],
+              ['What breaking the plan costs', 'Average R of on-plan vs off-plan trades, all versions.'],
+            ]} />
+          </S>
+
+          <S id="track" title="Top Setups track record">
+            <P>Independent of your trades: does the score itself have an edge? After each close (first after-hours run), the bot records the day’s qualified list — top 5 and the rest — at the closing price with the invalid-below level, gate and deterioration. On later after-hours runs it grades each pick from daily closes: return after 1, 5 and 10 sessions, SPY over the same window, whether no close was below the invalid-below level for 5 sessions, and the best close within 10. The Journal shows 5-session results by top 5 vs the rest, retest vs break, and score band.</P>
+          </S>
+
+          <S id="freeze" title="Rules v1 & the monthly review">
+            <P>Rules v1 took effect Oct 11, 2026. Every trade is tagged with its ruleset, and the Edge panel only counts trades under the current one. Thresholds, scores, presets and limits change only at the monthly review (next: Nov 8) — never mid-month and never because of a recent loss. At the review: look at the process score, the Edge panel and the track record; change at most one or two things; bump the version.</P>
+          </S>
+
           <S id="limits-of" title="What it can’t tell you">
             <ul className="list-disc space-y-1.5 pl-5 text-[13px] leading-relaxed text-neutral-300">
-              <li>None of the scores or multipliers is proven yet. They encode a sensible process; whether they have edge is what the Journal stats and the planned scorecard will show.</li>
+              <li>None of the scores, multipliers or exit presets is proven yet. They encode a sensible process; the Edge panel and the Top Setups track record will show whether they have edge — it takes 20–50 trades and several weeks.</li>
               <li>No news. The AI sees our numbers only; earnings and events are known only if you add them as catalysts.</li>
               <li>Intraday sequence (break then retest) is checked on 15-min bars only for SPY, QQQ and the top 7 setups. Everything else is daily.</li>
               <li>Snapshots are 15 minutes apart. Between them, prices on Sectors can be stale; Lookup is live every minute.</li>

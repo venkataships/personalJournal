@@ -10,7 +10,10 @@ import {
   SETUPS, MISTAKES, STATES, DEFAULT_LIMITS, setupLabel, mistakeLabel, positionValue, computePnl,
   riskAmount, rMultiple, closeStatus, positionCap, tradeValue, isClosed, riskCheck, pulseContext,
   journalStats, usd, signedUsd, todayET, daysAgoET, CHECKLIST, prefillChecklist, checklistScore,
+  RULESET, EXIT_PRESETS, presetPlan, planText, EXIT_REASONS, exitReasonLabel, isPlanExit, exitPlanStatus,
+  tiltCheck, TRAIL_LABEL,
 } from '../../lib/journal';
+import { ProcessCard, EdgePanel } from './Edge';
 
 // Log every trade (here or /log in Telegram), close it, review it. Risk rules
 // are checked at log time; breaking one needs a reason, which is kept.
@@ -28,17 +31,23 @@ const daysSince = (iso) => (iso ? Math.max(0, Math.round((Date.now() - new Date(
 const needsReason = (f) => !f.reason || f.reason.startsWith('(logged from Telegram');
 
 // Insert/update that still works before migration 007 (checklist column) is run.
+const NEW_COLS = { checklist: '007_journal_checklist', exit_plan: '012_process_edge', ruleset: '012_process_edge', exit_reason: '012_process_edge' };
+
+// Saves a trade; if Supabase doesn't have a newer column yet, saves without it and says which migration to run.
 async function writeTrade(row, id) {
   const run = (r) => (id ? supabase.from('trade_journal').update(r).eq('id', id) : supabase.from('trade_journal').insert(r));
-  let { error } = await run(row);
-  if (error && 'checklist' in row && /checklist/i.test(error.message || '')) {
-    const rest = { ...row };
-    delete rest.checklist;
-    ({ error } = await run(rest));
-    if (!error) return 'Saved without the checklist — run migration 007_journal_checklist.sql in Supabase.';
+  let cur = { ...row };
+  const dropped = new Set();
+  for (let i = 0; i < 4; i += 1) {
+    const { error } = await run(cur);
+    if (!error) break;
+    const col = Object.keys(NEW_COLS).find((c) => c in cur && new RegExp(c, 'i').test(error.message || ''));
+    if (!col) throw error;
+    dropped.add(NEW_COLS[col]);
+    delete cur[col];
+    cur = { ...cur };
   }
-  if (error) throw error;
-  return null;
+  return dropped.size ? `Saved without some fields — run ${[...dropped].join(', ')}.sql in Supabase.` : null;
 }
 
 async function fetchQuotes(tickers) {
@@ -130,7 +139,7 @@ export default function Journal() {
               <h1 className="flex items-center gap-2.5 text-3xl font-light tracking-tight text-neutral-100">
                 <BookText className="h-7 w-7 text-emerald-400" strokeWidth={1.5} /> Journal
               </h1>
-              <p className="mt-1 text-[13px] text-neutral-500">Log every trade. Close it. Review it. The numbers keep you honest.</p>
+              <p className="mt-1 text-[13px] text-neutral-500">Your job is to execute the plan, not to predict. Log it, follow it, review it — the edge shows up over many trades.</p>
             </div>
             <div className="flex items-center gap-2">
               <Link to="/sectors" className="inline-flex items-center gap-1.5 rounded border border-neutral-800 px-3 py-2 text-[12px] text-neutral-400 hover:border-emerald-500/40 hover:text-emerald-300">
@@ -152,6 +161,8 @@ export default function Journal() {
           {toast && <Banner tone="ok">{toast}</Banner>}
         </header>
 
+        <ProcessCard trades={trades} />
+
         <RiskStrip
           acct={acct} cap={cap} limits={limits} realizedToday={realizedToday}
           optionsOpen={optionsOpen} openCount={open.length}
@@ -172,7 +183,7 @@ export default function Journal() {
             </button>
           ) : (
             <LogForm
-              params={params} limits={limits} acct={acct} open={open} closedToday={closedToday}
+              params={params} limits={limits} acct={acct} open={open} closedToday={closedToday} closedRecent={closed}
               snapshot={snapshot} onCancel={() => setShowForm(false)}
               onSaved={(msg) => { setShowForm(false); after(msg); }}
             />
@@ -184,6 +195,7 @@ export default function Journal() {
 
         <OpenTrades trades={open} quotes={quotes} onDone={after} />
         <ClosedTrades trades={closed} onDone={after} />
+        <EdgePanel trades={trades} />
         <Stats trades={trades} />
         <LimitsEditor limits={limits} acct={acct} portfolio={portfolio} onSaved={after} />
       </div>
@@ -278,7 +290,7 @@ function Chips({ options, value, onChange, multi }) {
   return (
     <div className="flex flex-wrap gap-1.5">
       {options.map((o) => (
-        <button key={o.id} type="button" onClick={() => click(o.id)}
+        <button key={o.id} type="button" onClick={() => click(o.id)} title={o.hint}
           className={`rounded border px-2 py-1 text-[11px] transition-colors ${on(o.id) ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-200' : 'border-neutral-800 text-neutral-400 hover:border-neutral-600'}`}>
           {o.label}
         </button>
@@ -350,7 +362,7 @@ function ChecklistChip({ cl }) {
   );
 }
 
-function LogForm({ params, limits, acct, open, closedToday, snapshot, onCancel, onSaved }) {
+function LogForm({ params, limits, acct, open, closedToday, closedRecent, snapshot, onCancel, onSaved }) {
   const [f, setF] = useState(() => ({
     direction: params.get('dir') === 'short' ? 'short' : 'long',
     instrument: params.get('instrument') === 'option' ? 'option' : 'stock',
@@ -362,6 +374,7 @@ function LogForm({ params, limits, acct, open, closedToday, snapshot, onCancel, 
     setup: params.get('setup') || null,
     why: '',
     state: null,
+    plan: presetPlan('standard'),
   }));
   const [reasons, setReasons] = useState({});
   const [clEdits, setClEdits] = useState({}); // user taps override the auto-fill
@@ -379,10 +392,14 @@ function LogForm({ params, limits, acct, open, closedToday, snapshot, onCancel, 
   const ctx = useMemo(() => (ticker ? pulseContext(snapshot, ticker) : null), [snapshot, ticker]);
   const clAuto = prefillChecklist(ticker ? ctx : null, stop, f.direction);
   const checklist = { ...clAuto, ...clEdits };
-  const flags = riskCheck(limits, acct, open, closedToday,
-    { ticker, instrument: f.instrument, entry_price: entry, quantity: qty, stop_loss: stop });
+  const n = { ticker, instrument: f.instrument, entry_price: entry, quantity: qty, stop_loss: stop, state: f.state };
+  const limitFlags = riskCheck(limits, acct, open, closedToday, n);
+  const tiltFlags = tiltCheck(n, closedRecent);
+  const flags = [...limitFlags, ...tiltFlags.map((t) => ({ ...t, tilt: true }))];
   const missingReason = flags.filter((fl) => (reasons[fl.rule] || '').trim().length < 3);
-  const canSave = ticker && qty > 0 && entry > 0 && (f.instrument === 'stock' || f.option_desc.trim()) && missingReason.length === 0 && !saving;
+  const needs = [!f.state && 'how you feel', !f.plan && 'an exit plan'].filter(Boolean);
+  const canSave = ticker && qty > 0 && entry > 0 && (f.instrument === 'stock' || f.option_desc.trim())
+    && missingReason.length === 0 && needs.length === 0 && !saving;
 
   async function prefillPrice() {
     if (!ticker || f.entry || f.instrument !== 'stock') return;
@@ -404,10 +421,10 @@ function LogForm({ params, limits, acct, open, closedToday, snapshot, onCancel, 
         trade_type: f.setup === 'discord' ? 'discord_alert' : 'independent',
         status: 'open', source: 'dashboard', pulse_context: ctx,
         risk_flags: flags.map((fl) => ({ ...fl, reason: reasons[fl.rule].trim() })),
-        opened_at: now.toISOString(), checklist,
+        opened_at: now.toISOString(), checklist, exit_plan: f.plan, ruleset: RULESET,
       };
       const warn = await writeTrade(row);
-      onSaved(`Logged ${f.direction} ${ticker} — ${usd(value)}, checklist ${checklistScore(checklist)}/7${flags.length ? `, ${flags.length} rule break${flags.length > 1 ? 's' : ''} on record` : ''}.${warn ? ` ${warn}` : ''}`);
+      onSaved(`Logged ${f.direction} ${ticker} — ${usd(value)}, checklist ${checklistScore(checklist)}/7, plan: ${planText(f.plan)}${flags.length ? `. ${flags.length} override${flags.length > 1 ? 's' : ''} on record` : ''}. Now let the plan do the work.${warn ? ` ${warn}` : ''}`);
     } catch (e) {
       setErr(e.message || 'Save failed.');
     } finally {
@@ -456,8 +473,12 @@ function LogForm({ params, limits, acct, open, closedToday, snapshot, onCancel, 
 
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <div><span className={label}>Setup</span><Chips options={SETUPS} value={f.setup} onChange={set('setup')} /></div>
-        <div><span className={label}>State of mind (optional)</span><Chips options={STATES} value={f.state} onChange={set('state')} /></div>
+        <div>
+          <span className={label}>How do you feel right now? <span className="normal-case tracking-normal text-neutral-600">(honest answer — it’s data)</span></span>
+          <Chips options={STATES} value={f.state} onChange={set('state')} />
+        </div>
       </div>
+      <ExitPlanPicker plan={f.plan} onChange={set('plan')} entry={entry} stop={stop} direction={f.direction} />
       <div className="mt-3">
         <label className={label} htmlFor="j-why">Why (one line)</label>
         <input id="j-why" className={input} value={f.why} placeholder="Reclaimed PDH on 2x volume, sector leading" onChange={(e) => set('why')(e.target.value)} />
@@ -476,10 +497,11 @@ function LogForm({ params, limits, acct, open, closedToday, snapshot, onCancel, 
 
       {flags.length > 0 && (
         <div className="mt-3 space-y-2 rounded border border-rose-500/40 bg-rose-500/5 p-3">
-          <div className="flex items-center gap-1.5 text-[12px] font-medium text-rose-200"><ShieldAlert className="h-4 w-4" /> This trade breaks {flags.length} rule{flags.length > 1 ? 's' : ''}. Say why — it stays on the record.</div>
+          <div className="flex items-center gap-1.5 text-[12px] font-medium text-rose-200"><ShieldAlert className="h-4 w-4" />
+            {limitFlags.length > 0 ? `This trade breaks ${limitFlags.length} rule${limitFlags.length > 1 ? 's' : ''}` : 'Pause before this one'}{limitFlags.length && tiltFlags.length ? ' — and a tilt check' : ''}. Say why — it stays on the record.</div>
           {flags.map((fl) => (
             <div key={fl.rule}>
-              <div className="text-[12px] text-rose-300">{fl.message}</div>
+              <div className={`text-[12px] ${fl.tilt ? 'text-amber-200' : 'text-rose-300'}`}>{fl.tilt ? '⏸ ' : ''}{fl.message}</div>
               <input className={`${input} mt-1`} placeholder="Reason for overriding" value={reasons[fl.rule] || ''}
                 onChange={(e) => setReasons((r) => ({ ...r, [fl.rule]: e.target.value }))} />
             </div>
@@ -488,12 +510,53 @@ function LogForm({ params, limits, acct, open, closedToday, snapshot, onCancel, 
       )}
 
       {err && <Banner tone="error">{err}</Banner>}
+      {needs.length > 0 && ticker && <div className="mt-3 text-right text-[11px] text-neutral-500">Still needed: {needs.join(' and ')}.</div>}
       <div className="mt-4 flex justify-end gap-2">
         <button onClick={onCancel} className="rounded border border-neutral-800 px-4 py-2 text-[12px] text-neutral-400 hover:text-neutral-200">Cancel</button>
         <button onClick={save} disabled={!canSave}
           className={`rounded border px-4 py-2 text-[12px] font-medium uppercase tracking-[0.12em] disabled:opacity-40 ${flags.length ? 'border-rose-500/50 bg-rose-500/10 text-rose-200' : 'border-emerald-500/50 bg-emerald-500/10 text-emerald-200'}`}>
           {saving ? 'Saving…' : flags.length ? `Log with ${flags.length} override${flags.length > 1 ? 's' : ''}` : 'Log trade'}
         </button>
+      </div>
+    </div>
+  );
+}
+
+
+// Exit plan, chosen before entry. Shows the actual prices when entry and stop are filled in.
+function ExitPlanPicker({ plan, onChange, entry, stop, direction }) {
+  const perR = entry && stop != null ? Math.abs(entry - stop) : null;
+  const sign = direction === 'short' ? -1 : 1;
+  const at = (r) => (perR ? (entry + sign * r * perR).toFixed(2) : null);
+  const custom = plan?.preset === 'custom';
+  const setField = (k) => (e) => onChange({ ...plan, preset: 'custom', [k]: e.target.value === '' ? null : Number(e.target.value) });
+  return (
+    <div className="mt-3 rounded border border-neutral-900 bg-neutral-900/30 px-3 py-2.5">
+      <span className={label}>Exit plan — decided now, not in the moment</span>
+      <div className="flex flex-wrap gap-1.5">
+        {EXIT_PRESETS.map((p) => (
+          <button key={p.id} type="button" title={p.hint} onClick={() => onChange(presetPlan(p.id))}
+            className={`rounded border px-2.5 py-1 text-[12px] ${plan?.preset === p.id ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-200' : 'border-neutral-800 text-neutral-400 hover:text-neutral-200'}`}>{p.label}</button>
+        ))}
+        <button type="button" onClick={() => onChange({ ...(plan || presetPlan('standard')), preset: 'custom' })}
+          className={`rounded border px-2.5 py-1 text-[12px] ${custom ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-200' : 'border-neutral-800 text-neutral-400 hover:text-neutral-200'}`}>Custom</button>
+      </div>
+      {custom && (
+        <div className="mt-2 grid grid-cols-3 gap-2 text-[11px] text-neutral-500">
+          <label>Trim at (R)<input inputMode="decimal" className={`${input} mt-1 font-mono`} value={plan.trim_r ?? ''} onChange={setField('trim_r')} /></label>
+          <label>Trail on close under
+            <select className={`${input} mt-1`} value={plan.trail} onChange={(e) => onChange({ ...plan, trail: e.target.value })}>
+              {Object.entries(TRAIL_LABEL).map(([k, v]) => <option key={k} value={k} className="bg-neutral-900">{v}</option>)}
+            </select>
+          </label>
+          <label>Time stop (sessions)<input inputMode="numeric" className={`${input} mt-1 font-mono`} value={plan.time_days ?? ''} onChange={setField('time_days')} /></label>
+        </div>
+      )}
+      <div className="mt-2 text-[12px] leading-relaxed text-neutral-300">
+        {plan?.trim_r ? <>Trim {Math.round((plan.trim_frac || 1 / 3) * 100)}% at <span className="font-mono">{plan.trim_r}R{at(plan.trim_r) && ` = ${at(plan.trim_r)}`}</span>. </> : 'No trim. '}
+        {plan?.trail && plan.trail !== 'none' ? <>The rest exits on a daily close under the {TRAIL_LABEL[plan.trail]}. </> : 'No trailing exit. '}
+        {plan?.time_days ? <>If it isn’t at +1R{at(1) && <span className="font-mono"> ({at(1)})</span>} after {plan.time_days} sessions, it’s out. </> : ''}
+        {stop != null && <>Stop <span className="font-mono">{stop}</span> = −1R.</>}
       </div>
     </div>
   );
@@ -552,6 +615,7 @@ function OpenTrades({ trades, quotes, onDone }) {
                       className="rounded border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] text-emerald-200">Close</button>
                   </div>
                 </div>
+                <PlanLine t={t} px={px} />
                 {isOpen && panel.kind === 'close' && <ClosePanel t={t} qty={qty} livePx={px} onDone={(m) => { setPanel(null); onDone(m); }} />}
                 {isOpen && panel.kind === 'edit' && <EditPanel t={t} onDone={(m) => { setPanel(null); onDone(m); }} />}
               </div>
@@ -560,6 +624,20 @@ function OpenTrades({ trades, quotes, onDone }) {
         </div>
       )}
     </section>
+  );
+}
+
+const TONE_CLS = { good: 'border-emerald-500/40 text-emerald-300', warn: 'border-amber-500/40 text-amber-300', bad: 'border-rose-500/40 text-rose-300' };
+
+function PlanLine({ t, px }) {
+  if (!t.exit_plan) return <div className="px-4 pb-2.5 text-[11px] text-neutral-600">No exit plan on this trade (logged before v1) — decide one in Details.</div>;
+  const st = exitPlanStatus(t, px);
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 px-4 pb-2.5 text-[11px]">
+      <span className="text-neutral-500">Plan: {planText(t.exit_plan)}</span>
+      {st?.items.map((i) => <span key={i.text} className={`rounded border px-1.5 py-0.5 ${TONE_CLS[i.tone]}`}>{i.text}</span>)}
+      {st && !st.items.length && <span className="text-neutral-600">· on plan — nothing to do</span>}
+    </div>
   );
 }
 
@@ -591,12 +669,28 @@ function ReviewFields({ r, setR }) {
   );
 }
 
+// Douglas: judge the execution, not the outcome.
+function closeMessage(followed, pnl) {
+  if (followed == null) return '';
+  if (followed && pnl < 0) return 'Clean loss — you followed the plan. That is the job.';
+  if (followed) return 'Plan followed. That is the edge doing its work.';
+  if (pnl > 0) return 'A win off-plan — the most dangerous kind, because it teaches the wrong lesson.';
+  return 'Off-plan loss. Write the one lesson down and let it go.';
+}
+
 function ClosePanel({ t, qty, livePx, onDone }) {
   const [exit, setExit] = useState(livePx != null ? String(livePx) : '');
   const [date, setDate] = useState(todayET());
   const [r, setR] = useState({ followed: null, mistakes: [], lesson: '' });
+  const [reason, setReason] = useState(null);
   const [err, setErr] = useState(null);
   const inst = t.instrument || 'stock';
+  const pickReason = (id) => {
+    setReason(id);
+    if (!id) { setR((s) => ({ ...s, followed: null })); return; }
+    // Exiting by the plan with no override at entry = followed; an emotional exit = didn't. You can change it.
+    setR((s) => ({ ...s, followed: isPlanExit(id) && !(t.risk_flags || []).length ? 'yes' : 'no' }));
+  };
   const x = num(exit);
   const pnl = x != null && qty ? computePnl(Number(t.entry_price), x, qty, t.direction || 'long', inst) : null;
   const risk = riskAmount(Number(t.entry_price), t.stop_loss != null ? Number(t.stop_loss) : null, qty, inst);
@@ -609,11 +703,11 @@ function ClosePanel({ t, qty, livePx, onDone }) {
         status: closeStatus(t.direction || 'long', x, t.stop_loss != null ? Number(t.stop_loss) : null),
         closed_at: new Date().toISOString(),
         followed_plan: r.followed == null ? null : r.followed === 'yes', mistakes: r.mistakes, lesson: r.lesson.trim() || null,
+        exit_reason: reason,
       };
       if (!t.quantity && qty) upd.quantity = qty;
-      const { error } = await supabase.from('trade_journal').update(upd).eq('id', t.id);
-      if (error) throw error;
-      onDone(`Closed ${t.ticker}: ${signedUsd(pnl, 2)}${upd.r_multiple != null ? ` (${upd.r_multiple}R)` : ''}.`);
+      const warn = await writeTrade(upd, t.id);
+      onDone(`Closed ${t.ticker}: ${signedUsd(pnl, 2)}${upd.r_multiple != null ? ` (${upd.r_multiple}R)` : ''}. ${closeMessage(upd.followed_plan, pnl)}${warn ? ` ${warn}` : ''}`);
     } catch (e) { setErr(e.message || 'Close failed.'); }
   }
   return (
@@ -627,11 +721,15 @@ function ClosePanel({ t, qty, livePx, onDone }) {
           <span className={pnlClass(pnl)}>{pnl == null ? '—' : signedUsd(pnl, 2)}</span>
           <span className="text-[11px] text-neutral-500">{pnl != null && risk ? `${(pnl / risk).toFixed(2)}R` : 'no stop → no R'}</span>
         </div>
+        <div className="sm:col-span-3">
+          <span className={label}>Why are you exiting?</span>
+          <Chips options={EXIT_REASONS} value={reason} onChange={pickReason} />
+        </div>
         <ReviewFields r={r} setR={setR} />
       </div>
       {err && <Banner tone="error">{err}</Banner>}
       <div className="mt-3 flex justify-end">
-        <button disabled={x == null || x < 0} onClick={save}
+        <button disabled={x == null || x < 0 || !reason} onClick={save}
           className="rounded border border-emerald-500/50 bg-emerald-500/10 px-4 py-2 text-[12px] font-medium uppercase tracking-[0.12em] text-emerald-200 disabled:opacity-40">Close trade</button>
       </div>
     </div>
@@ -643,6 +741,7 @@ function EditPanel({ t, onDone }) {
   const [why, setWhy] = useState(t.thesis || '');
   const [flags, setFlags] = useState(t.risk_flags || []);
   const [cl, setCl] = useState(() => t.checklist || prefillChecklist(t.pulse_context, t.stop_loss, t.direction));
+  const [plan, setPlan] = useState(t.exit_plan || presetPlan('standard'));
   const [err, setErr] = useState(null);
   async function save() {
     setErr(null);
@@ -651,6 +750,7 @@ function EditPanel({ t, onDone }) {
       const s = num(stop);
       const warn = await writeTrade({
         stop_loss: s, thesis: why.trim() || null, risk_flags: flags, checklist: cl,
+        ...(t.exit_plan ? {} : { exit_plan: plan }),
         stop_loss_pct: s && t.entry_price ? Math.round((Math.abs(t.entry_price - s) / t.entry_price) * 10000) / 100 : null,
       }, t.id);
       onDone(`Updated ${t.ticker}.${warn ? ` ${warn}` : ''}`);
@@ -664,6 +764,9 @@ function EditPanel({ t, onDone }) {
         <div className="sm:col-span-2"><label className={label}>Why</label>
           <input className={input} value={why} onChange={(e) => setWhy(e.target.value)} /></div>
       </div>
+      {t.exit_plan
+        ? <div className="mt-3 text-[12px] text-neutral-400"><span className={label}>Exit plan (set at entry — not changed mid-trade)</span>{planText(t.exit_plan)}</div>
+        : <ExitPlanPicker plan={plan} onChange={setPlan} entry={Number(t.entry_price)} stop={num(stop)} direction={t.direction} />}
       {t.pulse_context && <div className="mt-3"><span className={label}>System read when logged</span><PulseRead ctx={t.pulse_context} /></div>}
       <div className="mt-3"><Checklist value={cl} auto={t.checklist ? null : cl} onChange={setCl} /></div>
       {flags.length > 0 && (
@@ -708,6 +811,7 @@ function ClosedTrades({ trades, onDone }) {
                 <SetupChip id={t.setup} />
                 <ChecklistChip cl={t.checklist} />
                 {t.status === 'stopped_out' && <span className="text-[10px] uppercase text-neutral-500">stopped</span>}
+                {t.exit_reason && <span className={`rounded border px-1.5 py-0.5 text-[10px] ${isPlanExit(t.exit_reason) ? 'border-neutral-800 text-neutral-400' : 'border-amber-500/40 text-amber-300'}`}>{exitReasonLabel(t.exit_reason)}</span>}
                 {t.followed_plan === true && <span className="text-emerald-400" title="Followed plan">✓ plan</span>}
                 {t.followed_plan === false && <span className="text-rose-400" title="Broke plan">✗ plan</span>}
                 {(t.mistakes || []).map((m) => <span key={m} className="rounded border border-amber-500/30 px-1.5 py-0.5 text-[10px] text-amber-300">{mistakeLabel(m)}</span>)}
@@ -730,20 +834,24 @@ function ClosedTrades({ trades, onDone }) {
 
 function ReviewPanel({ t, onDone }) {
   const [r, setR] = useState({ followed: null, mistakes: t.mistakes || [], lesson: t.lesson || '' });
+  const [reason, setReason] = useState(t.exit_reason || null);
   const [err, setErr] = useState(null);
   async function save() {
     try {
       await authReady();
-      const { error } = await supabase.from('trade_journal').update({
+      const warn = await writeTrade({
         followed_plan: r.followed === 'yes', mistakes: r.mistakes, lesson: r.lesson.trim() || null,
-      }).eq('id', t.id);
-      if (error) throw error;
-      onDone(`Reviewed ${t.ticker}.`);
+        ...(reason ? { exit_reason: reason } : {}),
+      }, t.id);
+      onDone(`Reviewed ${t.ticker}. ${closeMessage(r.followed === 'yes', Number(t.pnl))}${warn ? ` ${warn}` : ''}`);
     } catch (e) { setErr(e.message || 'Save failed.'); }
   }
   return (
     <div className="border-t border-neutral-900 bg-neutral-900/30 px-4 py-3">
-      <div className="grid gap-3 sm:grid-cols-3"><ReviewFields r={r} setR={setR} /></div>
+      <div className="grid gap-3 sm:grid-cols-3">
+        {!t.exit_reason && <div className="sm:col-span-3"><span className={label}>Why did you exit?</span><Chips options={EXIT_REASONS} value={reason} onChange={setReason} /></div>}
+        <ReviewFields r={r} setR={setR} />
+      </div>
       {err && <Banner tone="error">{err}</Banner>}
       <div className="mt-3 flex justify-end">
         <button disabled={r.followed == null} onClick={save} className="rounded border border-emerald-500/50 bg-emerald-500/10 px-4 py-2 text-[12px] font-medium uppercase tracking-[0.12em] text-emerald-200 disabled:opacity-40">Save review</button>
@@ -805,7 +913,7 @@ function Stats({ trades }) {
   return (
     <section className="mb-6">
       <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
-        <SectionTitle title="What’s working" hint="Your real trades — by setup, by whether the system agreed, by rule breaks and mistakes." />
+        <SectionTitle title="Results — after process" hint="P&L lives here, below the process, on purpose. By setup, system agreement, feelings, exits and mistakes." />
         <div className="flex rounded border border-neutral-800 p-0.5 text-[11px]">
           {[['30', '30d'], ['90', '90d'], ['all', 'All']].map(([k, l]) => (
             <button key={k} onClick={() => setPeriod(k)} className={`rounded px-3 py-1 ${period === k ? 'bg-emerald-500/15 text-emerald-300' : 'text-neutral-500'}`}>{l}</button>
@@ -839,7 +947,8 @@ function Stats({ trades }) {
                 ))}
               </div>
             )}
-            <StatTable title="State of mind" rows={s.byState} labelFn={(k) => STATES.find((x) => x.id === k)?.label ?? k} />
+            <StatTable title="How you felt at entry" rows={s.byState} labelFn={(k) => STATES.find((x) => x.id === k)?.label ?? k} note="Fear, greed, hope, revenge, euphoria — which ones cost you?" />
+            <StatTable title="Why you exited" rows={s.byExit} labelFn={exitReasonLabel} note="Stop, trail, trim, time and invalidated are the plan working; the rest are emotions." />
           </div>
         </>
       )}
