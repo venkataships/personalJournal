@@ -13,7 +13,7 @@ const TOC = [
   ['Rules', [['pdh', 'PDH / PDL events'], ['retest', 'Retest'], ['ema', '8/21 trend'], ['phase', 'Phase vs SPY'], ['gate', 'Market gate'],
     ['setups', 'Top Setups score'], ['det', 'Deterioration'], ['volume', 'Volume & streaks'], ['events', 'Event rules'],
     ['sizing', 'Sizing multipliers'], ['limits', 'Risk limits'], ['checklist', 'Journal checklist'],
-    ['exit-plan', 'Exit plans'], ['tilt', 'Tilt guards'], ['edge', 'Process & edge'], ['track', 'Top Setups track record'], ['freeze', 'Rules v1 & the monthly review']]],
+    ['exit-plan', 'Exit plans'], ['tilt', 'Tilt guards'], ['edge', 'Process & edge'], ['track', 'Top Setups track record'], ['reversal', 'Reversal study'], ['freeze', 'Rules v1 & the monthly review']]],
   ['Honesty', [['limits-of', 'What it can’t tell you']]],
 ];
 
@@ -345,6 +345,18 @@ export default function Guide() {
 
           <S id="track" title="Top Setups track record">
             <P>Independent of your trades: does the score itself have an edge? After each close (first after-hours run), the bot records the day’s qualified list — top 5 and the rest — at the closing price with the invalid-below level, gate and deterioration. On later after-hours runs it grades each pick from daily closes: return after 1, 5 and 10 sessions, SPY over the same window, whether no close was below the invalid-below level for 5 sessions, and the best close within 10. The Journal shows 5-session results by top 5 vs the rest, retest vs break, and score band.</P>
+          </S>
+
+          <S id="reversal" title="Reversal study (data only)">
+            <P>Days when names flush at the open and recover. Recorded to find out whether buying the recovery works — <B>not a trading rule</B>; the Nov 8 review decides whether it becomes one.</P>
+            <Defs items={[
+              ['Recorded when', 'A 15-min snapshot in regular hours first shows the AI-notes reversal rule: fell 0.8+ ATR below yesterday’s close, then bounced 0.5+ ATR off the low and won back half the drop (or a full ATR). Every scanned name, once per day — not capped like the notes.'],
+              ['Hypothetical trade', 'Entry = the price at that snapshot. Stop = the day’s low so far. 1R = entry − low.'],
+              ['Graded after the close', 'Close in R (−1R if it traded back below the low that day), next session’s close, the 5th session’s close (−1R if the low broke first), best close within 5 sessions.'],
+              ['Splits', '“Strong” = daily 8/21 up and Leading/Improving vs SPY at detection. Also by market gate.'],
+              ['Where', 'Journal → Your edge → Reversal study. “Show the latest cases” lists each one.'],
+            ]} />
+            <P>What would make it a rule: enough cases (30+), a positive average R at the 5-day mark with “lost the low” well under half, and a clear difference between strong names and the rest.</P>
           </S>
 
           <S id="freeze" title="Rules v1 & the monthly review">

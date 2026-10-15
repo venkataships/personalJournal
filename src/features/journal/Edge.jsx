@@ -111,6 +111,7 @@ export function EdgePanel({ trades }) {
       </div>
 
       <SetupTrackRecord />
+      <ReversalStudy />
     </section>
   );
 }
@@ -188,6 +189,113 @@ function SetupTrackRecord() {
               </tbody>
             </table>
           )}
+    </div>
+  );
+}
+
+// Flush-then-recover days: every reversal-up the bot saw, graded as if bought at detection with the
+// day's low as the stop. Data only — not a rule until the monthly review says so.
+function ReversalStudy() {
+  const [st, setSt] = useState({ rows: null, error: null });
+  const [showCases, setShowCases] = useState(false);
+  useEffect(() => {
+    const id = setTimeout(async () => {
+      try {
+        await authReady();
+        const { data, error } = await supabase.from('reversal_grades').select('*').order('day', { ascending: false }).limit(500);
+        if (error) throw error;
+        setSt({ rows: data || [], error: null });
+      } catch (e) {
+        setSt({ rows: [], error: /reversal_grades/.test(e.message || '') ? 'Run migrations/013_reversal_study.sql to start recording.' : e.message });
+      }
+    }, 0);
+    return () => clearTimeout(id);
+  }, []);
+  const rows = st.rows || [];
+  const graded = rows.filter((r) => r.r_close != null);
+  const avg = (xs) => (xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 100) / 100 : null);
+  const line = (k, rs) => {
+    const r5 = rs.filter((r) => r.r5 != null);
+    return {
+      k, n: rs.length, close: avg(rs.map((r) => Number(r.r_close))), win: rs.length ? Math.round((rs.filter((r) => Number(r.r_close) > 0).length / rs.length) * 100) : null,
+      r1: avg(rs.filter((r) => r.r1 != null).map((r) => Number(r.r1))), r5: avg(r5.map((r) => Number(r.r5))), n5: r5.length,
+      under: rs.length ? Math.round((rs.filter((r) => r.undercut).length / rs.length) * 100) : null,
+    };
+  };
+  const lines = [
+    line('All reversals', graded),
+    line('Strong names (8/21 up, leading)', graded.filter((r) => r.strong)),
+    line('Everything else', graded.filter((r) => !r.strong)),
+    line('Gate green', graded.filter((r) => r.gate === 'green')),
+    line('Gate caution / red', graded.filter((r) => r.gate && r.gate !== 'green')),
+  ].filter((l) => l.n);
+  return (
+    <div className="mt-3 rounded-md border border-neutral-800 bg-neutral-950/40">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-neutral-900 px-3 py-2">
+        <span className="text-[11px] uppercase tracking-[0.16em] text-neutral-400">Reversal study — flush, then recovery</span>
+        <span className="text-[10px] text-amber-300/80">data only · not a rule until the review</span>
+      </div>
+      <div className="px-3 py-2 text-[11px] leading-relaxed text-neutral-500">
+        Each case: the first 15-min snapshot where a name had fallen 0.8+ ATR below yesterday’s close and won back half the drop. Graded as if bought right there with the day’s low as the stop (= −1R). Taking out that low later counts as −1R.
+      </div>
+      {st.rows == null ? <div className="px-3 pb-3 text-[12px] text-neutral-600">Loading…</div>
+        : st.error ? <div className="px-3 pb-3 text-[12px] text-neutral-500">{st.error}</div>
+          : !rows.length ? <div className="px-3 pb-3 text-[12px] text-neutral-500">No cases yet — recording starts on the next market day.</div>
+            : (
+              <>
+                {lines.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[560px] text-[12px]">
+                      <thead><tr className="text-left text-[9px] uppercase tracking-wider text-neutral-600">
+                        <th className="px-3 py-1.5 font-normal"> </th><th className="px-2 py-1.5 text-right font-normal">Cases</th>
+                        <th className="px-2 py-1.5 text-right font-normal">Up at close</th><th className="px-2 py-1.5 text-right font-normal">Avg R close</th>
+                        <th className="px-2 py-1.5 text-right font-normal">Next day</th><th className="px-2 py-1.5 text-right font-normal">5 days</th>
+                        <th className="px-3 py-1.5 text-right font-normal" title="Traded back below the low the same day">Lost the low</th></tr></thead>
+                      <tbody>
+                        {lines.map((l) => (
+                          <tr key={l.k} className="border-t border-neutral-900">
+                            <td className="px-3 py-1.5 text-neutral-300">{l.k}</td>
+                            <td className="px-2 py-1.5 text-right font-mono tabular-nums text-neutral-400">{l.n}</td>
+                            <td className="px-2 py-1.5 text-right font-mono tabular-nums text-neutral-300">{l.win}%</td>
+                            <td className={`px-2 py-1.5 text-right font-mono tabular-nums ${tone(l.close)}`}>{sR(l.close)}</td>
+                            <td className={`px-2 py-1.5 text-right font-mono tabular-nums ${tone(l.r1)}`}>{sR(l.r1)}</td>
+                            <td className={`px-2 py-1.5 text-right font-mono tabular-nums ${tone(l.r5)}`}>{l.n5 ? sR(l.r5) : '—'}<span className="text-neutral-600">{l.n5 ? ` (${l.n5})` : ''}</span></td>
+                            <td className="px-3 py-1.5 text-right font-mono tabular-nums text-neutral-300">{l.under}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : <div className="px-3 pb-2 text-[12px] text-neutral-500">{rows.length} case{rows.length > 1 ? 's' : ''} recorded; grades land after today’s close.</div>}
+                <button onClick={() => setShowCases((v) => !v)} className="w-full border-t border-neutral-900 py-1.5 text-[11px] text-neutral-500 hover:text-neutral-300">
+                  {showCases ? 'Hide cases' : `Show the ${Math.min(rows.length, 15)} latest cases`}
+                </button>
+                {showCases && (
+                  <div className="overflow-x-auto border-t border-neutral-900">
+                    <table className="w-full min-w-[620px] text-[11px]">
+                      <thead><tr className="text-left text-[9px] uppercase tracking-wider text-neutral-600">
+                        {['Day', 'Ticker', 'Seen at', 'Low → entry', 'Drop / bounce', 'Strong', 'Gate', 'Close', '5 days'].map((h) => <th key={h} className="px-2 py-1.5 font-normal first:pl-3">{h}</th>)}
+                      </tr></thead>
+                      <tbody>
+                        {rows.slice(0, 15).map((r) => (
+                          <tr key={r.id} className="border-t border-neutral-900 font-mono tabular-nums text-neutral-300">
+                            <td className="px-2 py-1.5 pl-3 text-neutral-500">{r.day.slice(5)}</td>
+                            <td className="px-2 py-1.5 font-semibold text-neutral-100">{r.ticker}</td>
+                            <td className="px-2 py-1.5">{r.detected_at}</td>
+                            <td className="px-2 py-1.5">{Number(r.low).toFixed(2)} → {Number(r.price).toFixed(2)}</td>
+                            <td className="px-2 py-1.5">{Number(r.drop_pct).toFixed(1)}% / +{Number(r.bounce_pct).toFixed(1)}%</td>
+                            <td className="px-2 py-1.5">{r.strong ? <span className="text-emerald-300">yes</span> : <span className="text-neutral-500">no</span>}</td>
+                            <td className="px-2 py-1.5 font-sans text-neutral-400">{r.gate || '—'}</td>
+                            <td className={`px-2 py-1.5 ${tone(r.r_close)}`}>{r.r_close == null ? '…' : r.undercut ? '−1R lost low' : sR(r.r_close)}</td>
+                            <td className={`px-2 py-1.5 ${tone(r.r5)}`}>{r.r5 == null ? '…' : sR(r.r5)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
     </div>
   );
 }
