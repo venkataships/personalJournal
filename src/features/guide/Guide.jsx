@@ -352,6 +352,8 @@ export default function Guide() {
             <Defs items={[
               ['Recorded when', 'A 15-min snapshot in regular hours first shows the AI-notes reversal rule: fell 0.8+ ATR below yesterday’s close, then bounced 0.5+ ATR off the low and won back half the drop (or a full ATR). Every scanned name, once per day — not capped like the notes.'],
               ['Hypothetical trade', 'Entry = the price at that snapshot. Stop = the day’s low so far. 1R = entry − low.'],
+              ['Coverage', 'Every watchlist and pulse-group name the pulse scans (~150), checked every 15 min. Group names carry a running day low; watchlist-only names are sampled, so each new case re-reads Public 15-min bars to get the true low (one request per case). “Lost the low” is judged only from bars after the moment it was spotted.'],
+              ['Blind spots', 'A flush and full recovery between two snapshots can be missed; the first regular-hours snapshot is ~9:30–9:45; a name with no live quote that day is skipped.'],
               ['Graded after the close', 'Close in R (−1R if it traded back below the low that day), next session’s close, the 5th session’s close (−1R if the low broke first), best close within 5 sessions.'],
               ['Splits', '“Strong” = daily 8/21 up and Leading/Improving vs SPY at detection. Also by market gate.'],
               ['Where', 'Journal → Your edge → Reversal study. “Show the latest cases” lists each one.'],
