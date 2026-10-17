@@ -63,7 +63,7 @@ export default function SystemTrader() {
     return () => { off = true; };
   }, []);
 
-  const book = useMemo(() => st.trades.filter((t) => t.book === RULESET && (mode === 'all' || t.mode === mode)), [st.trades, mode]);
+  const book = useMemo(() => st.trades.filter((t) => t.book === RULESET && (mode === 'all' ? t.mode !== 'early' : t.mode === mode)), [st.trades, mode]);
   const closed = book.filter((t) => t.status === 'closed' && t.r_multiple != null);
   const open = book.filter((t) => t.status === 'open');
   const sys = rstats(closed.map((t) => Number(t.r_multiple)));
@@ -93,6 +93,7 @@ export default function SystemTrader() {
   const daily = st.logs.find((l) => l.kind === 'system_daily');
   const weekly = st.logs.find((l) => l.kind === 'system_weekly');
   const hasReplay = st.trades.some((t) => t.mode === 'replay');
+  const hasEarly = st.trades.some((t) => t.mode === 'early');
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-neutral-200 antialiased">
@@ -115,13 +116,13 @@ export default function SystemTrader() {
 
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <div className="flex rounded border border-neutral-800 p-0.5 text-[11px]">
-            {[['live', 'Live'], ['replay', 'Replay'], ['all', 'Both']].map(([k, l]) => (
-              <button key={k} onClick={() => setMode(k)} disabled={k !== 'live' && !hasReplay}
+            {[['live', 'Live'], ['replay', 'Replay'], ['all', 'Live + replay'], ['early', '9:30 test']].map(([k, l]) => (
+              <button key={k} onClick={() => setMode(k)} disabled={(k === 'replay' || k === 'all') ? !hasReplay : k === 'early' ? !hasEarly : false}
                 className={`rounded px-3 py-1 disabled:opacity-30 ${mode === k ? 'bg-emerald-500/15 text-emerald-300' : 'text-neutral-500 hover:text-neutral-300'}`}>{l}</button>
             ))}
           </div>
           <span className="text-[11px] text-neutral-600">
-            {mode === 'replay' ? 'Rebuilt from saved snapshots — early ones used slightly older rules.' : mode === 'all' ? 'Live and replay together.' : 'Trades taken since the system trader went live.'}
+            {mode === 'replay' ? 'Rebuilt from saved snapshots — a logic check, not evidence (the rules were written after those weeks).' : mode === 'all' ? 'Live and replay together.' : mode === 'early' ? 'Shadow book: same rules, entries allowed from 9:30 instead of 10:00. Data only.' : 'Trades taken since the system trader went live.'}
           </span>
         </div>
 
@@ -147,6 +148,8 @@ export default function SystemTrader() {
         )}
 
         <BenchCard bench={bench} hold={hold} loaded={!!qqq} nClosed={closed.length} />
+
+        <StartTimeCard trades={st.trades} />
 
         <div className="mb-6 grid gap-3 lg:grid-cols-2">
           <LogCard title="Today’s log" row={daily} />
@@ -228,6 +231,47 @@ function BenchCard({ bench, hold, loaded, nClosed }) {
           </p>
         </>
       )}
+    </section>
+  );
+}
+
+// Does skipping the first 30 minutes help? Same rules, two start times (live 10:00 vs shadow 9:30).
+function StartTimeCard({ trades }) {
+  const closedOf = (m) => trades.filter((t) => t.book === RULESET && t.mode === m && t.status === 'closed' && t.r_multiple != null);
+  const live = closedOf('live');
+  const early = closedOf('early');
+  if (!early.length && !trades.some((t) => t.mode === 'early')) return null;
+  const pre = early.filter((t) => String(t.entry_time || '') < '10:00');
+  const rows = [
+    ['From 10:00 (the rule)', rstats(live.map((t) => Number(t.r_multiple)))],
+    ['From 9:30 (shadow)', rstats(early.map((t) => Number(t.r_multiple)))],
+    ['…of which entered before 10:00', rstats(pre.map((t) => Number(t.r_multiple)))],
+  ];
+  return (
+    <section className="mb-6">
+      <Title t="Start-time test" hint="Same rules, two books: one waits until 10:00, the shadow one may enter from 9:30. Data only; decide at the monthly review." />
+      <div className="overflow-x-auto rounded-md border border-neutral-800">
+        <table className="w-full min-w-[520px] text-[12px]">
+          <thead><tr className="text-left text-[9px] uppercase tracking-wider text-neutral-600">
+            <th className="px-3 py-1.5 font-normal"> </th><th className="px-2 py-1.5 text-right font-normal">Closed</th>
+            <th className="px-2 py-1.5 text-right font-normal">Win %</th><th className="px-2 py-1.5 text-right font-normal">Avg R</th>
+            <th className="px-3 py-1.5 text-right font-normal">Total R</th></tr></thead>
+          <tbody>
+            {rows.map(([k, s]) => (
+              <tr key={k} className="border-t border-neutral-900">
+                <td className="px-3 py-1.5 text-neutral-200">{k}</td>
+                <td className="px-2 py-1.5 text-right font-mono tabular-nums text-neutral-400">{s.n || 0}</td>
+                <td className="px-2 py-1.5 text-right font-mono tabular-nums text-neutral-300">{s.n ? `${s.win}%` : '—'}</td>
+                <td className={`px-2 py-1.5 text-right font-mono tabular-nums ${tone(s.avg)}`}>{sR(s.avg)}</td>
+                <td className={`px-3 py-1.5 text-right font-mono tabular-nums ${tone(s.total)}`}>{sR(s.total)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-1.5 text-[11px] leading-relaxed text-neutral-600">
+        The pre-10:00 row is the answer: if those trades average better than the 10:00 book over 20+ trades, the first 30 minutes are worth trading. Fills at the open are the least realistic (widest spreads), so give the early book a haircut when comparing.
+      </p>
     </section>
   );
 }
