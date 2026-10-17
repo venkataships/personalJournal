@@ -8,7 +8,7 @@ import { Compass } from 'lucide-react';
 
 const TOC = [
   ['Start here', [['overview', 'What this is'], ['zone', 'Trading in the zone'], ['flow', 'How data moves'], ['day', 'Your day']]],
-  ['Pages', [['sectors', 'Sectors'], ['lookup', 'Lookup'], ['plan', 'Plan a trade'], ['ai-notes', 'AI notes'],
+  ['Pages', [['sectors', 'Sectors'], ['lookup', 'Lookup'], ['plan', 'Plan a trade'], ['ai-notes', 'Notes & alerts'], ['alerts', 'Alerts'],
     ['playbook', 'Playbook'], ['journal', 'Journal'], ['system', 'System trader'], ['watchlist', 'Watchlist'], ['other-pages', 'Home, Dashboard, Positions, Intelligence, Prep']]],
   ['Rules', [['pdh', 'PDH / PDL events'], ['retest', 'Retest'], ['ema', '8/21 trend'], ['phase', 'Phase vs SPY'], ['gate', 'Market gate'],
     ['setups', 'Top Setups score'], ['det', 'Deterioration'], ['volume', 'Volume & streaks'], ['events', 'Event rules'],
@@ -130,7 +130,21 @@ export default function Guide() {
             <Note>With the current limits the position cap (lower of $5,000 or 5% of the account) usually sets share size — actual risk is often well under the risk % you type. Options aren’t capped that way, so the risk % decides their size.</Note>
           </S>
 
-          <S id="ai-notes" title="AI notes">
+          <S id="alerts" title="Alerts">
+            <Page answers="Did anything just happen that my rules say I should act on?"
+              data="alerts.py, after each regular-hours pulse. Rules only, no AI. Shown at the top of Sectors (today, refreshed every minute) and on Notes & alerts (any day)." />
+            <Defs items={[
+              ['Setup ready', 'A Top 5 pick now meets the system trader’s entry rule: retest held (15-min not shaky/lost), gate not red, deterioration under 3, valid stop below price. From 10:00 ET. Shows price, stop, gate, det, cautions, and a Plan-a-trade link.'],
+              ['Retest lost', 'A name alerted today whose retest stopped holding — the entry rule no longer qualifies it.'],
+              ['Stop', 'An open stock trade in your journal at or through its stop.'],
+              ['Trim', 'At your exit plan’s trim level (e.g. 2R).'],
+              ['Trail / Time stop', 'From 15:30 ET only, because both act on the close: trading under your plan’s trail EMA, or at the time stop and not +1R.'],
+              ['Rules of the alerts', 'Each fires at most once a day per name or trade. Options trades are skipped (their stop is a premium). They state what your rules say; whether to act is your call.'],
+              ['Telegram', 'Off. To turn it back on, add PULSE_ALERTS_TELEGRAM=1 to the server .env and restart. PULSE_ALERTS=0 stops alerts entirely.'],
+            ]} />
+          </S>
+
+          <S id="ai-notes" title="Notes & alerts">
             <Page answers="What just happened that matters to me, and what does my plan say about it?"
               data="Rules detect events from each snapshot; Claude Haiku 5.5 writes the words. Brief at the top of Sectors; every note by day on AI notes." />
             <Defs items={[
@@ -173,7 +187,6 @@ export default function Guide() {
               ['Replay', 'On its first run the bot rebuilds a history from every saved snapshot, day by day without look-ahead — labelled “replay” and kept apart from live trades. It only checks that the logic runs on real data and gives the page something to show: the rules were written after seeing those weeks, so replay is not evidence the rules work. Only live trades are.'],
               ['vs QQQ', 'The benchmark (you’re tech-heavy). For each closed trade: the same dollars held in QQQ over the same days (index entry = that day’s open, exit = close of the exit or trim day). Also shows the whole account held in QQQ since the first entry. A few weeks mostly reflects market direction, so judge it over months.'],
               ['Start-time test', 'A shadow book runs the same rules but may enter from 9:30 instead of 10:00 (mode “early”, data only). The 10:00 start exists because the open is the noisiest stretch: gaps fake breakouts, volume ratios are inflated, the 15-min retest check has no bars yet, spreads are wide. The table shows whether pre-10:00 entries do better or worse. Decide at the monthly review.'],
-              ['Alerts', 'Telegram, after each regular-hours pulse, once a day each. Setup ready: a Top 5 pick meets the system’s entry rule (from 10:00), with stop and a Plan-a-trade link; retest lost if it stops holding. Your open stock trades: through the stop, at the trim level, and from 15:30 under the trail EMA or at the time stop. They say what your rules say; the decision is yours. PULSE_ALERTS=0 in the server .env turns them off.'],
               ['System vs you', 'Same names (your journal entry within 3 days of the system’s): both R’s side by side. Skipped: system trades you didn’t take and what they did. Off-system: your trades the rules wouldn’t have taken.'],
               ['Daily log & Friday review', 'Haiku writes them after the close from the numbers (rules text if the AI is off). It explains what the rules did; it never picks trades.'],
               ['Reading it', 'System positive, you not: execution. Both negative: the rules — change them at the monthly review. Under ~30 closed trades, neither says much.'],

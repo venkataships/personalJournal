@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, createContext, useContext } from 'react';
 import HelpLink from '../../components/HelpLink';
 import DetChip from '../../components/DetChip';
+import { TodayAlerts } from '../alerts/Alerts';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft, AlertCircle, RefreshCw, TrendingUp, TrendingDown, Radar,
@@ -263,6 +264,9 @@ export default function SectorPulse() {
 
         {/* Live market bar — same component and tickers as the Watchlist page */}
         <MarketBar />
+
+        {/* Alerts on your rules (bot: alerts.py) */}
+        <TodayAlerts />
 
         {/* AI brief + today's notes (hidden until the bot has written one) */}
         <AiNotes brief={state.brief} events={state.notes} session={row?.session} />

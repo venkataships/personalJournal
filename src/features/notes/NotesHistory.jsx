@@ -5,11 +5,13 @@ import { supabase, authReady } from '../../lib/supabase';
 import { todayET } from '../../lib/journal';
 import { etTime, etDayRange, shiftDay, modelName } from '../../lib/notes';
 import { BriefBody, EventRow } from '../sectors/AiNotes';
+import { AlertRow } from '../alerts/Alerts';
 
 // Every AI brief and event note the bot has written, one day at a time.
 // The Sectors page shows only the current brief; this is the record.
 
-const FILTERS = [['all', 'Everything'], ['brief', 'Briefs'], ['event', 'Event notes']];
+const FILTERS = [['all', 'Everything'], ['alert', 'Alerts'], ['brief', 'Briefs'], ['event', 'Event notes']];
+const KINDS = ['alert', 'brief', 'event'];   // system trader logs live on the System page
 const dayLabel = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
 
 export default function NotesHistory() {
@@ -39,9 +41,10 @@ export default function NotesHistory() {
   }, [day, load]);
 
   const loading = st.for !== day;
-  const rows = useMemo(() => (loading ? [] : st.rows), [loading, st.rows]);
+  const rows = useMemo(() => (loading ? [] : st.rows.filter((r) => KINDS.includes(r.kind))), [loading, st.rows]);
   const briefs = rows.filter((r) => r.kind === 'brief');
   const events = rows.filter((r) => r.kind === 'event');
+  const alerts = rows.filter((r) => r.kind === 'alert');
   const shown = rows.filter((r) => filter === 'all' || r.kind === filter);
   const cost = rows.reduce((s, r) => s + (Number(r.cost_usd) || 0), 0);
   const go = (d) => nav(d === today ? '/notes' : `/notes/${d}`);
@@ -51,10 +54,10 @@ export default function NotesHistory() {
       <div className="mx-auto max-w-4xl px-4 py-8 sm:px-8">
         <header className="mb-5">
           <h1 className="flex items-center gap-2.5 text-3xl font-light tracking-tight text-neutral-100">
-            <History className="h-6 w-6 text-emerald-400" strokeWidth={1.5} /> AI notes
+            <History className="h-6 w-6 text-emerald-400" strokeWidth={1.5} /> Notes &amp; alerts
           </h1>
           <p className="mt-1 text-[13px] text-neutral-500">
-            Every brief and event note, by day. The current brief lives on <Link to="/sectors" className="text-emerald-300 hover:underline">Sector Pulse</Link>.
+            Every alert, brief and event note, by day. Today’s alerts and the current brief live on <Link to="/sectors" className="text-emerald-300 hover:underline">Sector Pulse</Link>.
           </p>
         </header>
 
@@ -77,7 +80,7 @@ export default function NotesHistory() {
           <div className="text-[13px] text-neutral-200">{dayLabel(day)}</div>
           {!loading && rows.length > 0 && (
             <div className="font-mono text-[11px] text-neutral-600" title="What the AI calls cost that day">
-              {briefs.length} brief{briefs.length !== 1 ? 's' : ''} · {events.length} note{events.length !== 1 ? 's' : ''} · AI cost ${cost.toFixed(4)}
+              {alerts.length} alert{alerts.length !== 1 ? 's' : ''} · {briefs.length} brief{briefs.length !== 1 ? 's' : ''} · {events.length} note{events.length !== 1 ? 's' : ''} · AI cost ${cost.toFixed(4)}
             </div>
           )}
         </div>
@@ -96,7 +99,9 @@ export default function NotesHistory() {
           <div className="overflow-hidden rounded-md border border-neutral-800">
             {shown.map((r, i) => (r.kind === 'brief'
               ? <BriefRow key={r.id} brief={r} first={i === 0 && day === today} />
-              : <div key={r.id} className="border-b border-neutral-900 last:border-0"><EventRow e={r} /></div>))}
+              : r.kind === 'alert'
+                ? <AlertRow key={r.id} a={r} />
+                : <div key={r.id} className="border-b border-neutral-900 last:border-0"><EventRow e={r} /></div>))}
           </div>
         )}
       </div>

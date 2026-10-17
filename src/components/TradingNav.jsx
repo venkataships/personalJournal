@@ -9,7 +9,7 @@ const LINKS = [
   { to: '/sectors',       label: 'Sectors',      icon: Radar },
   { to: '/watchlist',     label: 'Watchlist',    icon: Eye },
   { to: '/lookup',        label: 'Lookup',       icon: Search },
-  { to: '/notes',         label: 'AI notes',     icon: History },
+  { to: '/notes',         label: 'Notes & alerts',     icon: History },
   { to: '/playbook',      label: 'Playbook',     icon: BookMarked },
   { to: '/journal',       label: 'Journal',      icon: BookText },
   { to: '/system',        label: 'System',       icon: Bot },
