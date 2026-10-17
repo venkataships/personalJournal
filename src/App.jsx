@@ -15,6 +15,7 @@ import Lookup from './features/lookup/Lookup';
 import NotesHistory from './features/notes/NotesHistory';
 import Playbook from './features/playbook/Playbook';
 import Guide from './features/guide/Guide';
+import SystemTrader from './features/system/SystemTrader';
 
 export default function App() {
   return (
@@ -40,6 +41,7 @@ export default function App() {
           <Route path="/notes/:day"     element={<NotesHistory />} />
           <Route path="/playbook"       element={<Playbook />} />
           <Route path="/guide"          element={<Guide />} />
+          <Route path="/system"         element={<SystemTrader />} />
         </Route>
         <Route path="*"               element={<Navigate to="/" replace />} />
       </Routes>

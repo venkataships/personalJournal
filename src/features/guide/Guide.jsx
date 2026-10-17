@@ -9,7 +9,7 @@ import { Compass } from 'lucide-react';
 const TOC = [
   ['Start here', [['overview', 'What this is'], ['zone', 'Trading in the zone'], ['flow', 'How data moves'], ['day', 'Your day']]],
   ['Pages', [['sectors', 'Sectors'], ['lookup', 'Lookup'], ['plan', 'Plan a trade'], ['ai-notes', 'AI notes'],
-    ['playbook', 'Playbook'], ['journal', 'Journal'], ['watchlist', 'Watchlist'], ['other-pages', 'Home, Dashboard, Positions, Intelligence, Prep']]],
+    ['playbook', 'Playbook'], ['journal', 'Journal'], ['system', 'System trader'], ['watchlist', 'Watchlist'], ['other-pages', 'Home, Dashboard, Positions, Intelligence, Prep']]],
   ['Rules', [['pdh', 'PDH / PDL events'], ['retest', 'Retest'], ['ema', '8/21 trend'], ['phase', 'Phase vs SPY'], ['gate', 'Market gate'],
     ['setups', 'Top Setups score'], ['det', 'Deterioration'], ['volume', 'Volume & streaks'], ['events', 'Event rules'],
     ['sizing', 'Sizing multipliers'], ['limits', 'Risk limits'], ['checklist', 'Journal checklist'],
@@ -160,6 +160,20 @@ export default function Guide() {
               ['Close + review', 'Exit, P&L and R (P&L ÷ risk at entry), and why you exited. Exiting by the plan pre-fills “followed plan”; an emotional exit pre-fills “no” — you can change either.'],
               ['Process / Edge', <>Top of the page: trades by plan and streak. Below the trades: the <A to="edge">Edge panel</A> and the <A to="track">Top Setups track record</A>, then results.</>],
               ['Stats', 'By setup, by checklist score, retest vs break entries, rule breaks — this is where you learn whether the process has an edge.'],
+            ]} />
+          </S>
+
+          <S id="system" title="System trader">
+            <Page answers="Do the rules make money when followed perfectly — and how far is my execution from that?"
+              data="paper_trades, written by the bot (paper_trader.py) from the same snapshots the Sectors page shows. Paper only — no orders." />
+            <Defs items={[
+              ['Entry', 'From 10:00 ET, on each 15-min snapshot: a Top 5 pick with a held retest (not “shaky”/“lost” on 15-min bars), market gate not red, deterioration under 3, at most 5 open positions, one per ticker. Enters at that snapshot’s price.'],
+              ['Stop & size', 'Stop = the setup’s invalid-below. Size = the Plan-a-trade math (account $80k, 3% risk, condition multipliers), capped by your per-ticker position cap. The daily-stop cap isn’t applied.'],
+              ['Exits', 'Standard swing, from daily bars after the close: a later session opening through the stop fills at the open; trading through it fills at the stop; trim ⅓ at 2R; the rest on a daily close under the 21 EMA; out after 5 sessions if not trimmed and under +1R. If one day touches both the stop and the trim, the stop is assumed first. Entry day uses 15-min bars after the entry.'],
+              ['Replay', 'On its first run the bot rebuilds a history from every saved snapshot, day by day without look-ahead — labelled “replay” and kept apart from live trades.'],
+              ['System vs you', 'Same names (your journal entry within 3 days of the system’s): both R’s side by side. Skipped: system trades you didn’t take and what they did. Off-system: your trades the rules wouldn’t have taken.'],
+              ['Daily log & Friday review', 'Haiku writes them after the close from the numbers (rules text if the AI is off). It explains what the rules did; it never picks trades.'],
+              ['Reading it', 'System positive, you not: execution. Both negative: the rules — change them at the monthly review. Under ~30 closed trades, neither says much.'],
             ]} />
           </S>
 
