@@ -5,6 +5,11 @@ import { supabase, authReady } from '../../lib/supabase';
 import { RULESET, isClosed } from '../../lib/journal';
 import { etDay, modelName } from '../../lib/notes';
 import HelpLink from '../../components/HelpLink';
+import { BENCH, matchedBenchmark, holdAll } from '../../lib/benchmark';
+
+const ACCOUNT = 80000; // paper account (bot default PAPER_ACCOUNT)
+const sUsd = (v) => (v == null ? '—' : `${v < 0 ? '−' : '+'}$${Math.abs(Math.round(v)).toLocaleString()}`);
+const sPct = (v) => (v == null ? '—' : `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(1)}%`);
 
 // Rules v1 traded mechanically on paper by the bot (paper_trader.py). It measures the RULES;
 // the Journal measures YOU. The gap between them is execution.
@@ -30,6 +35,7 @@ function rstats(rs) {
 export default function SystemTrader() {
   const [st, setSt] = useState({ loaded: false, error: null, trades: [], journal: [], logs: [] });
   const [mode, setMode] = useState('live');
+  const [qqq, setQqq] = useState(null); // daily QQQ bars; null until loaded or if unavailable
 
   useEffect(() => {
     const id = setTimeout(async () => {
@@ -47,6 +53,14 @@ export default function SystemTrader() {
       }
     }, 0);
     return () => clearTimeout(id);
+  }, []);
+
+  useEffect(() => {
+    let off = false;
+    fetch(`/api/bars?symbols=${BENCH}`).then((r) => (r.ok ? r.json() : null)).then((j) => {
+      if (!off && Array.isArray(j?.[BENCH]) && j[BENCH].length) setQqq(j[BENCH]);
+    }).catch(() => {});
+    return () => { off = true; };
   }, []);
 
   const book = useMemo(() => st.trades.filter((t) => t.book === RULESET && (mode === 'all' || t.mode === mode)), [st.trades, mode]);
@@ -69,6 +83,12 @@ export default function SystemTrader() {
       offSystem: rstats(offSystem.map((j) => Number(j.r_multiple))),
     };
   }, [st.trades, mine]);
+
+  const bench = useMemo(() => (qqq ? matchedBenchmark(book, qqq, ACCOUNT) : null), [book, qqq]);
+  const hold = useMemo(() => {
+    const days = book.map((t) => t.entry_day).sort();
+    return qqq && days.length ? holdAll(days[0], qqq, ACCOUNT) : null;
+  }, [book, qqq]);
 
   const daily = st.logs.find((l) => l.kind === 'system_daily');
   const weekly = st.logs.find((l) => l.kind === 'system_weekly');
@@ -126,6 +146,8 @@ export default function SystemTrader() {
           </p>
         )}
 
+        <BenchCard bench={bench} hold={hold} loaded={!!qqq} nClosed={closed.length} />
+
         <div className="mb-6 grid gap-3 lg:grid-cols-2">
           <LogCard title="Today’s log" row={daily} />
           <LogCard title="Friday review" row={weekly} />
@@ -177,6 +199,36 @@ export default function SystemTrader() {
         </p>
       </div>
     </div>
+  );
+}
+
+function BenchCard({ bench, hold, loaded, nClosed }) {
+  return (
+    <section className="mb-6 rounded-md border border-neutral-800 bg-neutral-950/50 px-4 py-3">
+      <div className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">vs {BENCH} — would holding the index have done better?</div>
+      {!loaded ? (
+        <p className="mt-1 text-[12px] text-neutral-600">{BENCH} prices unavailable right now.</p>
+      ) : !bench ? (
+        <p className="mt-1 text-[12px] text-neutral-600">{nClosed ? `Can’t match these trades to ${BENCH} bars yet.` : 'Appears once the first trade closes.'}</p>
+      ) : (
+        <>
+          <div className="mt-2 grid gap-px overflow-hidden rounded border border-neutral-800 bg-neutral-900 sm:grid-cols-3">
+            <GapCell k="System, closed trades" v={<span className={tone(bench.sys)}>{sUsd(bench.sys)} · {sPct(bench.sysPct)}</span>} note={`${bench.n} trades, % of a $${ACCOUNT.toLocaleString()} account`} />
+            <GapCell k={`Same dollars in ${BENCH}, same days`} v={<span className={tone(bench.qqq)}>{sUsd(bench.qqq)} · {sPct(bench.qqqPct)}</span>} note="each trade’s cost held in the index over its holding window" />
+            <GapCell k="System minus index" v={<span className={tone(bench.excess)}>{sUsd(bench.excess)}</span>} note={`beat the index on ${bench.beat} of ${bench.n} trades`} />
+          </div>
+          {hold && (
+            <p className="mt-2 text-[12px] text-neutral-500">
+              Whole account in {BENCH} from {hold.from.slice(5)} to {hold.to.slice(5)}: <span className={tone(hold.usd)}>{sUsd(hold.usd)} ({sPct(hold.pct)})</span>.
+              {' '}The book is rarely fully invested, so also compare this against its total result above.
+            </p>
+          )}
+          <p className="mt-1 text-[11px] leading-relaxed text-neutral-600">
+            Index entry = that day’s open (trades enter from 10:00 ET); exits at the close of the exit or trim day. Over a few weeks this mostly reflects the market’s direction, not skill — judge it over months.
+          </p>
+        </>
+      )}
+    </section>
   );
 }
 
