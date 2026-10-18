@@ -9,7 +9,7 @@ import { Compass } from 'lucide-react';
 const TOC = [
   ['Start here', [['overview', 'What this is'], ['zone', 'Trading in the zone'], ['flow', 'How data moves'], ['day', 'Your day']]],
   ['Pages', [['sectors', 'Sectors'], ['lookup', 'Lookup'], ['plan', 'Plan a trade'], ['ai-notes', 'Notes & alerts'], ['alerts', 'Alerts'],
-    ['playbook', 'Playbook'], ['journal', 'Journal'], ['system', 'System trader'], ['watchlist', 'Watchlist'], ['other-pages', 'Home, Dashboard, Positions, Intelligence, Prep']]],
+    ['playbook', 'Playbook'], ['journal', 'Journal'], ['system', 'System trader'], ['watchlist', 'Watchlist'], ['other-pages', 'Today, Positions, Intelligence']]],
   ['Rules', [['pdh', 'PDH / PDL events'], ['retest', 'Retest'], ['ema', '8/21 trend'], ['phase', 'Phase vs SPY'], ['gate', 'Market gate'],
     ['setups', 'Top Setups score'], ['det', 'Deterioration'], ['volume', 'Volume & streaks'], ['events', 'Event rules'],
     ['sizing', 'Sizing multipliers'], ['limits', 'Risk limits'], ['checklist', 'Journal checklist'],
@@ -84,11 +84,12 @@ export default function Guide() {
 
           <S id="day" title="Your day">
             <Steps items={[
-              ['Pre-market', <>Sectors: the market gate and the AI brief (one line each, minimized by default). Check catalysts. Look up any gapper in <L to="/lookup">Lookup</L> — it shows the live pre-market price.</>],
+              ['Pre-market', <><L to="/trading">Today</L>: set the intention, run check-ins, read last night’s plan. Then Sectors: the market gate and the AI brief (one line each, minimized by default). Check catalysts. Look up any gapper in <L to="/lookup">Lookup</L> — it shows the live pre-market price.</>],
               ['9:30–10:00', <>Don’t act on the first push. Breakouts on Top Setups show as “Break only” until they pull back; ~ means provisional until the close. Options spreads are widest now.</>],
               ['~10:00–11:00', <>The 15-min retest check has data. Pick from Top Setups with a <B>held retest</B>, open the ticker in Lookup, size it in <A to="plan">Plan a trade</A>, then <B>Log trade</B>.</>],
               ['Midday', <>AI notes flag big moves on your open trades and groups. Check at set times (say 10:30, 1:00, 3:30) — the system doesn’t need watching.</>],
               ['Close', <>Journal: each open trade shows its exit plan and whether a rule is triggered (trim zone, time stop). Close what the plan says to close — pick <B>why</B> you exited — and review.</>],
+              ['Evening', <><L to="/trading">Today</L> → Tonight: prep tomorrow. Generate the checklist; it becomes tomorrow’s plan.</>],
               ['Weekend', <>Process score and streak first, then the Edge panel and the Top Setups track record. Study traders’ rules → <L to="/playbook">Playbook</L>, but rule changes wait for the monthly review.</>],
             ]} />
           </S>
@@ -198,13 +199,11 @@ export default function Guide() {
             <P>Tickers with group, thesis, stage, sentiment and timeframe. Every watchlist ticker is also scanned by the pulse for Top Setups. Link to Sectors at the top.</P>
           </S>
 
-          <S id="other-pages" title="Home, Dashboard, Positions, Intelligence, Prep">
+          <S id="other-pages" title="Today, Positions, Intelligence">
             <Defs items={[
-              ['Home', 'Trading start page: check-ins, open trades, shortcuts.'],
-              ['Dashboard', 'Command center: daily check-ins, rule of the day, loss cap, trading portfolio.'],
+              ['Today', 'The start page (Home, Dashboard and Tomorrow’s Prep in one). Top: portfolio, open trades, check-ins, process score, position caps, and shortcuts. Then today’s alerts, today’s plan (the checklist you generated last night), intention and check-ins, rule of the day. Bottom: “Tonight: prep tomorrow” — generate tomorrow’s checklist from today’s intention, check-ins and life journal; tomorrow it shows as Today’s plan.'],
               ['Positions', 'Holdings, options positions and cash by account (Taxable, Roth, Joint…), entered by hand.'],
-              ['Intelligence', 'On-demand AI analyses (morning brief, sector analysis, watchlist pulse). Note: this page calls Claude from the browser with a key that ships to it — moving it behind the server is on the backlog.'],
-              ['Prep', 'Tomorrow prep for trading, work and life.'],
+              ['Intelligence', 'On-demand AI analyses (morning brief, sector analysis, watchlist pulse). Note: this page and the Today prep checklist call Claude from the browser with a key that ships to it — moving them behind the server is on the backlog.'],
             ]} />
           </S>
 

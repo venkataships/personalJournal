@@ -1,11 +1,10 @@
 import { useEffect } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { Home, LayoutDashboard, Radar, Eye, BookText, Briefcase, Brain, Sparkles, Search, History, BookMarked, Compass, Bot } from 'lucide-react';
+import { Home, Radar, Eye, BookText, Briefcase, Brain, Search, History, BookMarked, Compass, Bot } from 'lucide-react';
 
 // One bar across every trading page. Scrolls sideways on a phone.
 const LINKS = [
-  { to: '/trading',       label: 'Home',         icon: Home, end: true },
-  { to: '/dashboard',     label: 'Dashboard',    icon: LayoutDashboard },
+  { to: '/trading',       label: 'Today',        icon: Home, end: true },
   { to: '/sectors',       label: 'Sectors',      icon: Radar },
   { to: '/watchlist',     label: 'Watchlist',    icon: Eye },
   { to: '/lookup',        label: 'Lookup',       icon: Search },
@@ -15,7 +14,6 @@ const LINKS = [
   { to: '/system',        label: 'System',       icon: Bot },
   { to: '/positions',     label: 'Positions',    icon: Briefcase },
   { to: '/intelligence',  label: 'Intelligence', icon: Brain },
-  { to: '/tomorrow-prep', label: 'Prep',         icon: Sparkles },
   { to: '/guide',         label: 'Guide',        icon: Compass },
 ];
 
