@@ -36,6 +36,7 @@ export default function SystemTrader() {
   const [st, setSt] = useState({ loaded: false, error: null, trades: [], journal: [], logs: [] });
   const [mode, setMode] = useState('live');
   const [qqq, setQqq] = useState(null); // daily QQQ bars; null until loaded or if unavailable
+  const [live, setLive] = useState({ prices: {}, at: null }); // live quotes for open positions
 
   useEffect(() => {
     const id = setTimeout(async () => {
@@ -66,6 +67,29 @@ export default function SystemTrader() {
   const book = useMemo(() => st.trades.filter((t) => t.book === RULESET && (mode === 'all' ? t.mode !== 'early' : t.mode === mode)), [st.trades, mode]);
   const closed = book.filter((t) => t.status === 'closed' && t.r_multiple != null);
   const open = book.filter((t) => t.status === 'open');
+  const openKey = [...new Set(open.map((t) => t.ticker))].sort().join(',');
+
+  // Live prices for open positions, refreshed every minute (falls back to the last daily close).
+  useEffect(() => {
+    if (!openKey) return undefined;
+    let off = false;
+    const load = async () => {
+      try {
+        const r = await fetch(`/api/quotes?symbols=${openKey}`);
+        if (!r.ok) return;
+        const js = await r.json();
+        const prices = {};
+        for (const [sym, q] of Object.entries(js || {})) if (q?.price != null) prices[sym.toUpperCase()] = { price: q.price, session: q.session };
+        if (!off) setLive({ prices, at: new Date() });
+      } catch { /* optional */ }
+    };
+    load();
+    const id = setInterval(load, 60000);
+    return () => { off = true; clearInterval(id); };
+  }, [openKey]);
+  const marks = open.map((t) => openMark(t, live.prices[t.ticker]));
+  const openTotal = marks.reduce((a, m) => a + (m.pnl ?? 0), 0);
+  const openRisk = open.reduce((a, t) => a + Number(t.shares) * (Number(t.entry_price) - Number(t.stop)), 0);
   const sys = rstats(closed.map((t) => Number(t.r_multiple)));
   const mine = useMemo(() => st.journal.filter((t) => isClosed(t) && t.r_multiple != null && t.ruleset === RULESET), [st.journal]);
   const you = rstats(mine.map((t) => Number(t.r_multiple)));
@@ -188,8 +212,17 @@ export default function SystemTrader() {
         </section>
 
         <section className="mb-6">
-          <Title t={`Open positions (${open.length})`} hint="Marked at the last daily close. The plan: trim ⅓ at 2R, rest on a close under the 21 EMA, out after 5 sessions if not +1R." />
-          {open.length === 0 ? <Empty>No open positions.</Empty> : <Trades rows={open} open />}
+          <Title t={`Open positions (${open.length})`} hint="Open P&L uses live prices, refreshed every minute (* = last daily close when no quote). Includes any trim already taken. Exits are still decided after the close. The plan: trim ⅓ at 2R, rest on a close under the 21 EMA, out after 5 sessions if not +1R." />
+          {open.length > 0 && (
+            <div className="mb-2 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[12px]">
+              <span className="text-neutral-500">Open P&amp;L</span>
+              <span className={`font-mono text-[18px] tabular-nums ${tone(openTotal)}`}>{sUsd(openTotal)}</span>
+              <span className={`font-mono tabular-nums ${tone(openTotal)}`}>{sPct((openTotal / ACCOUNT) * 100)} of ${ACCOUNT.toLocaleString()}</span>
+              {openRisk > 0 && <span className={`font-mono tabular-nums ${tone(openTotal)}`}>{sR(Math.round((openTotal / openRisk) * 100) / 100)} on ${Math.round(openRisk).toLocaleString()} at risk</span>}
+              <span className="text-[11px] text-neutral-600">{live.at ? `live prices · ${live.at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'last daily close'}</span>
+            </div>
+          )}
+          {open.length === 0 ? <Empty>No open positions.</Empty> : <OpenTrades rows={open} marks={marks} />}
         </section>
 
         <section className="mb-6">
@@ -317,6 +350,82 @@ function LogCard({ title, row }) {
         </>
       )}
     </div>
+  );
+}
+
+// Open P&L for one paper position at `q.price` (live) or its last daily close. Includes a trim already taken.
+function openMark(t, q) {
+  const E = Number(t.entry_price); const S = Number(t.stop); const N = Number(t.shares);
+  const px = q?.price ?? (t.last_close != null ? Number(t.last_close) : null);
+  if (px == null || !N) return { px: null, pnl: null, r: null, pct: null, live: false };
+  const trimmed = t.trim_shares && t.trim_price ? Number(t.trim_shares) : 0;
+  const pnl = trimmed * (Number(t.trim_price || 0) - E) + (N - trimmed) * (px - E);
+  return {
+    px, live: q?.price != null, pnl: Math.round(pnl * 100) / 100,
+    r: E > S ? Math.round((pnl / (N * (E - S))) * 100) / 100 : null,
+    pct: Math.round((pnl / (N * E)) * 10000) / 100,
+  };
+}
+
+function OpenTrades({ rows, marks }) {
+  return (
+    <>
+      {/* phone: one card per position */}
+      <div className="space-y-2 sm:hidden">
+        {rows.map((t, i) => {
+          const m = marks[i];
+          return (
+            <div key={t.id} className="rounded-md border border-neutral-800 bg-neutral-950/50 px-3 py-2.5">
+              <div className="flex items-baseline justify-between gap-2">
+                <Link to={`/lookup/${t.ticker}`} className="font-mono text-[15px] font-semibold text-neutral-100">{t.ticker}</Link>
+                <span className={`font-mono text-[15px] tabular-nums ${tone(m.pnl)}`}>{sUsd(m.pnl)}</span>
+              </div>
+              <div className="mt-0.5 flex items-baseline justify-between gap-2 font-mono text-[12px] tabular-nums">
+                <span className="text-neutral-400">{t.shares} @ {Number(t.entry_price).toFixed(2)} → {m.px != null ? Number(m.px).toFixed(2) : '—'}{m.live ? '' : ' (close)'}</span>
+                <span className={tone(m.r)}>{sR(m.r)} · {sPct(m.pct)}</span>
+              </div>
+              <div className="mt-0.5 text-[11px] text-neutral-600">
+                {String(t.entry_day).slice(5)} {t.entry_time} · stop {Number(t.stop).toFixed(2)} · {t.sessions ?? 0}/5 sessions{t.trim_price ? ` · trimmed ${t.trim_shares} @ ${Number(t.trim_price).toFixed(2)}` : ''}
+                {t.mode !== 'live' && <span className="ml-1 uppercase">· {t.mode}</span>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {/* desktop: table */}
+      <div className="hidden overflow-x-auto rounded-md border border-neutral-800 sm:block">
+        <table className="w-full text-[12px]">
+          <thead><tr className="text-left text-[9px] uppercase tracking-wider text-neutral-600">
+            {['Entered', 'Ticker', 'Entry → stop', 'Shares', 'Now', 'Open P&L', 'R', 'Trim', 'Sessions'].map((h, i) => (
+              <th key={h} className={`px-2 py-1.5 font-normal first:pl-3 ${i >= 3 && i <= 6 ? 'text-right' : ''}`}>{h}</th>
+            ))}
+          </tr></thead>
+          <tbody>
+            {rows.map((t, i) => {
+              const m = marks[i];
+              return (
+                <tr key={t.id} className="border-t border-neutral-900" title={t.fill_note || undefined}>
+                  <td className="px-2 py-1.5 pl-3 font-mono text-neutral-500">{String(t.entry_day).slice(5)} {t.entry_time}</td>
+                  <td className="px-2 py-1.5 font-mono font-semibold text-neutral-100">
+                    <Link to={`/lookup/${t.ticker}`} className="hover:text-emerald-300 hover:underline">{t.ticker}</Link>
+                    {t.mode !== 'live' && <span className="ml-1 rounded border border-neutral-800 px-1 font-sans text-[9px] font-normal uppercase text-neutral-500">{t.mode}</span>}
+                  </td>
+                  <td className="px-2 py-1.5 font-mono tabular-nums text-neutral-300">{Number(t.entry_price).toFixed(2)} → {Number(t.stop).toFixed(2)}</td>
+                  <td className="px-2 py-1.5 text-right font-mono tabular-nums text-neutral-400">{t.shares}</td>
+                  <td className="px-2 py-1.5 text-right font-mono tabular-nums text-neutral-300" title={m.live ? 'live' : 'last daily close'}>
+                    {m.px != null ? Number(m.px).toFixed(2) : '—'}{!m.live && m.px != null && <span className="text-neutral-600">*</span>}
+                  </td>
+                  <td className={`px-2 py-1.5 text-right font-mono tabular-nums ${tone(m.pnl)}`}>{sUsd(m.pnl)} <span className="text-[10px] opacity-70">{sPct(m.pct)}</span></td>
+                  <td className={`px-2 py-1.5 text-right font-mono tabular-nums ${tone(m.r)}`}>{sR(m.r)}</td>
+                  <td className="px-2 py-1.5 font-mono text-neutral-400">{t.trim_price ? `${t.trim_shares} @ ${Number(t.trim_price).toFixed(2)}` : '—'}</td>
+                  <td className="px-2 py-1.5 text-neutral-400">{t.sessions ?? 0} / 5</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 
