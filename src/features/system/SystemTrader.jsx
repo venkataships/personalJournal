@@ -64,7 +64,7 @@ export default function SystemTrader() {
     return () => { off = true; };
   }, []);
 
-  const book = useMemo(() => st.trades.filter((t) => t.book === RULESET && (mode === 'all' ? t.mode !== 'early' : t.mode === mode)), [st.trades, mode]);
+  const book = useMemo(() => st.trades.filter((t) => t.book === RULESET && (mode === 'all' ? (t.mode === 'live' || t.mode === 'replay') : t.mode === mode)), [st.trades, mode]);
   const closed = book.filter((t) => t.status === 'closed' && t.r_multiple != null);
   const open = book.filter((t) => t.status === 'open');
   const openKey = [...new Set(open.map((t) => t.ticker))].sort().join(',');
@@ -118,6 +118,7 @@ export default function SystemTrader() {
   const weekly = st.logs.find((l) => l.kind === 'system_weekly');
   const hasReplay = st.trades.some((t) => t.mode === 'replay');
   const hasEarly = st.trades.some((t) => t.mode === 'early');
+  const hasWide = st.trades.some((t) => t.mode === 'wide');
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-neutral-200 antialiased">
@@ -140,13 +141,13 @@ export default function SystemTrader() {
 
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <div className="flex rounded border border-neutral-800 p-0.5 text-[11px]">
-            {[['live', 'Live'], ['replay', 'Replay'], ['all', 'Live + replay'], ['early', '9:30 test']].map(([k, l]) => (
-              <button key={k} onClick={() => setMode(k)} disabled={(k === 'replay' || k === 'all') ? !hasReplay : k === 'early' ? !hasEarly : false}
+            {[['live', 'Live'], ['replay', 'Replay'], ['all', 'Live + replay'], ['early', '9:30 test'], ['wide', 'Wide-stop test']].map(([k, l]) => (
+              <button key={k} onClick={() => setMode(k)} disabled={(k === 'replay' || k === 'all') ? !hasReplay : k === 'early' ? !hasEarly : k === 'wide' ? !hasWide : false}
                 className={`rounded px-3 py-1 disabled:opacity-30 ${mode === k ? 'bg-emerald-500/15 text-emerald-300' : 'text-neutral-500 hover:text-neutral-300'}`}>{l}</button>
             ))}
           </div>
           <span className="text-[11px] text-neutral-600">
-            {mode === 'replay' ? 'Rebuilt from saved snapshots — a logic check, not evidence (the rules were written after those weeks).' : mode === 'all' ? 'Live and replay together.' : mode === 'early' ? 'Shadow book: same rules, entries allowed from 9:30 instead of 10:00. Data only.' : 'Trades taken since the system trader went live.'}
+            {mode === 'replay' ? 'Rebuilt from saved snapshots — a logic check, not evidence (the rules were written after those weeks).' : mode === 'all' ? 'Live and replay together.' : mode === 'early' ? 'Shadow book: same rules, entries allowed from 9:30 instead of 10:00. Data only.' : mode === 'wide' ? 'Shadow book: same entries as live, stop = the lower of the setup stop and entry − 1 ATR. Data only.' : 'Trades taken since the system trader went live.'}
           </span>
         </div>
 
@@ -173,6 +174,7 @@ export default function SystemTrader() {
 
         <BenchCard bench={bench} hold={hold} loaded={!!qqq} nClosed={closed.length} />
 
+        <StopTestCard trades={st.trades} />
         <StartTimeCard trades={st.trades} />
 
         <div className="mb-6 grid gap-3 lg:grid-cols-2">
@@ -264,6 +266,60 @@ function BenchCard({ bench, hold, loaded, nClosed }) {
           </p>
         </>
       )}
+    </section>
+  );
+}
+
+// Are the setup stops too tight? Same entries, two stops: live (setup's invalid-below) vs wide (≥ 1 ATR).
+// Compared in dollars as well as R, because R units differ between the two books.
+function StopTestCard({ trades }) {
+  const of = (m) => trades.filter((t) => t.book === RULESET && t.mode === m);
+  const wide = of('wide');
+  if (!wide.length) return null;
+  const liveBy = new Map(of('live').map((t) => [`${t.ticker}|${t.entry_day}`, t]));
+  const pairs = wide.map((w) => ({ w, l: liveBy.get(`${w.ticker}|${w.entry_day}`) })).filter((x) => x.l);
+  const done = pairs.filter((x) => x.w.status === 'closed' && x.l.status === 'closed');
+  const side = (k) => {
+    const ts = done.map((x) => x[k]);
+    const stopPct = pairs.map((x) => (Number(x[k].entry_price) - Number(x[k].stop)) / Number(x[k].entry_price) * 100);
+    return {
+      ...rstats(ts.map((t) => Number(t.r_multiple))),
+      usd: Math.round(ts.reduce((a, t) => a + Number(t.pnl || 0), 0)),
+      stops: ts.filter((t) => t.exit_reason === 'stop' || t.exit_reason === 'gap_stop').length,
+      stopPct: stopPct.length ? Math.round((stopPct.reduce((a, b) => a + b, 0) / stopPct.length) * 100) / 100 : null,
+      days: ts.length ? Math.round((ts.reduce((a, t) => a + Number(t.sessions || 0), 0) / ts.length) * 10) / 10 : null,
+    };
+  };
+  const rows = [['Setup stop (the rule)', side('l')], ['Wide stop (≥ 1 ATR)', side('w')]];
+  return (
+    <section className="mb-6">
+      <Title t="Stop-width test" hint={`Same entries, two stops. ${pairs.length} paired trade${pairs.length !== 1 ? 's' : ''}, ${done.length} closed in both books. Data only; decide at the monthly review.`} />
+      <div className="overflow-x-auto rounded-md border border-neutral-800">
+        <table className="w-full min-w-[600px] text-[12px]">
+          <thead><tr className="text-left text-[9px] uppercase tracking-wider text-neutral-600">
+            {[' ', 'Avg stop', 'Closed', 'Stopped out', 'Avg sessions', 'Win %', 'Avg R', 'Total $'].map((h, i) => (
+              <th key={h} className={`px-2 py-1.5 font-normal first:pl-3 last:pr-3 ${i ? 'text-right' : ''}`}>{h}</th>
+            ))}
+          </tr></thead>
+          <tbody>
+            {rows.map(([k, s]) => (
+              <tr key={k} className="border-t border-neutral-900">
+                <td className="px-2 py-1.5 pl-3 text-neutral-200">{k}</td>
+                <td className="px-2 py-1.5 text-right font-mono tabular-nums text-neutral-400">{s.stopPct != null ? `${s.stopPct}%` : '—'}</td>
+                <td className="px-2 py-1.5 text-right font-mono tabular-nums text-neutral-400">{s.n || 0}</td>
+                <td className="px-2 py-1.5 text-right font-mono tabular-nums text-neutral-300">{s.n ? `${s.stops} of ${s.n}` : '—'}</td>
+                <td className="px-2 py-1.5 text-right font-mono tabular-nums text-neutral-400">{s.days ?? '—'}</td>
+                <td className="px-2 py-1.5 text-right font-mono tabular-nums text-neutral-300">{s.n ? `${s.win}%` : '—'}</td>
+                <td className={`px-2 py-1.5 text-right font-mono tabular-nums ${tone(s.avg)}`}>{sR(s.avg)}</td>
+                <td className={`px-2 py-1.5 pr-3 text-right font-mono tabular-nums ${tone(s.usd)}`}>{s.n ? sUsd(s.usd) : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-1.5 text-[11px] leading-relaxed text-neutral-600">
+        Both books risk the same 3%, so the wide book holds fewer shares. Read Total $ and the stop-out rate, not Avg R alone — in the tight book 1R is only a few dollars, so the same price move is many more R. If the wide book makes more dollars with far fewer stop-outs over 20+ pairs, the setup stops are too tight.
+      </p>
     </section>
   );
 }
