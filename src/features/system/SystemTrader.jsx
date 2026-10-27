@@ -224,6 +224,15 @@ export default function SystemTrader() {
               <span className="text-[11px] text-neutral-600">{live.at ? `live prices · ${live.at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'last daily close'}</span>
             </div>
           )}
+          {(() => {
+            const stuck = open.filter((t) => weekdaysBetween(String(t.entry_day), etDay(new Date().toISOString())) >= 1 && !(t.sessions > 0));
+            return stuck.length > 0 && (
+              <div className="mb-2 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-[12px] text-amber-200">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{stuck.map((t) => t.ticker).join(', ')} {stuck.length > 1 ? 'have' : 'has'} not been managed since entry (0 sessions counted), so stops, trims and the time stop haven’t been applied. Check the bot log after the close: <span className="font-mono">journalctl -u portfolio-agent --since today | grep -i paper</span></span>
+              </div>
+            );
+          })()}
           {open.length === 0 ? <Empty>No open positions.</Empty> : <OpenTrades rows={open} marks={marks} />}
         </section>
 
@@ -407,6 +416,19 @@ function LogCard({ title, row }) {
       )}
     </div>
   );
+}
+
+// Full weekdays strictly between two YYYY-MM-DD days (sessions that should have been managed by now).
+function weekdaysBetween(a, b) {
+  let n = 0;
+  const d = new Date(`${a}T12:00:00Z`);
+  const end = new Date(`${b}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  while (d < end) {
+    if (d.getUTCDay() % 6 !== 0) n += 1;
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  return n;
 }
 
 // Open P&L for one paper position at `q.price` (live) or its last daily close. Includes a trim already taken.
