@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, createContext, useContext } 
 import HelpLink from '../../components/HelpLink';
 import DetChip from '../../components/DetChip';
 import { TodayAlerts } from '../alerts/Alerts';
+import TopDown from './TopDown';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft, AlertCircle, RefreshCw, TrendingUp, TrendingDown, Radar,
@@ -305,6 +306,9 @@ export default function SectorPulse() {
             )}
 
             <CatCtx.Provider value={catCtx}>
+            {/* Top-down: market check → sectors → themes → setups in the leaders */}
+            <TopDown market={row.risk} groups={groups} setups={row.setups} />
+
             {/* Top setups */}
             {row.setups && <TopSetups setups={row.setups} market={row.risk?.state !== undefined ? row.risk : null} inTrade={state.inTrade} />}
 

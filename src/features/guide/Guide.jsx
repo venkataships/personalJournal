@@ -10,7 +10,7 @@ const TOC = [
   ['Start here', [['overview', 'What this is'], ['zone', 'Trading in the zone'], ['flow', 'How data moves'], ['day', 'Your day']]],
   ['Pages', [['sectors', 'Sectors'], ['lookup', 'Lookup'], ['plan', 'Plan a trade'], ['ai-notes', 'Notes & alerts'], ['alerts', 'Alerts'],
     ['playbook', 'Playbook'], ['journal', 'Journal'], ['system', 'System trader'], ['watchlist', 'Watchlist'], ['other-pages', 'Today, Positions, Intelligence']]],
-  ['Rules', [['pdh', 'PDH / PDL events'], ['retest', 'Retest'], ['ema', '8/21 trend'], ['phase', 'Phase vs SPY'], ['gate', 'Market gate'],
+  ['Rules', [['topdown', 'Top-down'], ['pdh', 'PDH / PDL events'], ['retest', 'Retest'], ['ema', '8/21 trend'], ['phase', 'Phase vs SPY'], ['gate', 'Market gate'],
     ['setups', 'Top Setups score'], ['det', 'Deterioration'], ['volume', 'Volume & streaks'], ['events', 'Event rules'],
     ['sizing', 'Sizing multipliers'], ['limits', 'Risk limits'], ['checklist', 'Journal checklist'],
     ['exit-plan', 'Exit plans'], ['tilt', 'Tilt guards'], ['edge', 'Process & edge'], ['track', 'Top Setups track record'], ['reversal', 'Reversal study'], ['freeze', 'Rules v1 & the monthly review']]],
@@ -251,10 +251,21 @@ export default function Guide() {
             ]} />
           </S>
 
+          <S id="topdown" title="Top-down (market → sectors → themes)">
+            <P>The panel at the top of Sectors runs a 20-minute morning routine from the snapshot. It finds nothing new — the universe is still your groups and watchlist — it tells you where to look first.</P>
+            <Defs items={[
+              ['1 · Market check', 'SPY uptrend = 8 EMA over 21 with price above and the 21 EMA higher than 5 sessions ago. QQQ vs SPY (growth risk-on or off) and IWM vs SPY (broad or mega-cap-only) use the same phase rules as everything else. VIX: under 15 subdued, 20+ elevated; elevated and up 10%+ in 5 sessions turns a green gate to caution.'],
+              ['2 · Sector ranking', 'The 11 Select Sector SPDRs ranked by 5-day + 20-day return minus SPY’s. Top 4 green, bottom 3 red. The arrow is the change in rank versus 5 sessions ago; a move of 3+ places is flagged as rotation.'],
+              ['3 · Themes', 'Theme ETFs (SMH, SOXX, AIQ, BAI, CIBR, DRAM, IGV, BOTZ, QTUM, MAGS → XLK; ITA, SHLD, PAVE, GRID, UFO → XLI; NLR, ICLN → XLU; URA → XLE; REMX → XLB) shown under the leading sectors, ranked the same way, with your groups that use them.'],
+              ['4 · Setups in the leaders', 'Qualified setups whose theme sits in a top-4 sector. They also get the +5 sector-rank points in the score.'],
+              ['If it’s weak', 'Market or sectors weak → smaller size (the gate and Plan-a-trade multipliers) or cash. Nothing qualifying is an answer too.'],
+            ]} />
+          </S>
+
           <S id="gate" title="Market gate">
             <Table head={['State', 'When', 'Setup score']} rows={[
               ['Green', 'SPY and QQQ both 8/21 up', 'no change'],
-              ['Caution', 'Only one up, or mixed', '−5'],
+              ['Caution', 'Only one up, or mixed — or both up but VIX ≥ 20 and up 10%+ in 5 sessions (since Oct 28)', '−5'],
               ['Red (“market says wait”)', 'Both down', '−15'],
             ]} />
             <P>Setups still show on red — the penalty and the label are the warning. Plan a trade also sizes down: caution ×0.75, red ×0.5.</P>
@@ -265,7 +276,7 @@ export default function Guide() {
             <Table head={['Points', 'Max', 'How']} rows={[
               ['Volume', '25', '2x avg 25 · 1.3x 18 · 1x 8 · retests get at least 12 (pullbacks are quiet)'],
               ['5d vs SPY', '20', '4 per point ahead of SPY, capped'],
-              ['Sector', '15', 'ETF Leading 15 · Improving 10 · In line/unknown 5 · Weakening 0'],
+              ['Sector', '15', 'Since Oct 28: theme ETF Leading 10 · Improving 7 · In line/unknown 3 · Weakening 0, plus its parent sector’s rank among the 11: top 4 +5 · middle (or no parent) +2 · bottom 3 +0. Without top-down data: the old scale (15 / 10 / 5 / 0).'],
               ['HH/HL streak', '15', '3+ days 15 · 2 days 10 · 1 day 5'],
               ['Entry', '15', 'held retest 15 (8 if sitting on the level) · break within 2% of PDH 10 · within 4% 5'],
               ['Not extended', '10', '≤ 8% above the 20-day EMA 10 · ≤ 15% 4'],
@@ -392,7 +403,7 @@ export default function Guide() {
           </S>
 
           <S id="freeze" title="Rules v1 & the monthly review">
-            <P>Rules v1 took effect Oct 11, 2026. Every trade is tagged with its ruleset, and the Edge panel only counts trades under the current one. Thresholds, scores, presets and limits change only at the monthly review (next: Nov 8) — never mid-month and never because of a recent loss. At the review: look at the process score, the Edge panel and the track record; change at most one or two things; bump the version.</P>
+            <P>Rules v1 took effect Oct 11, 2026. Every trade is tagged with its ruleset, and the Edge panel only counts trades under the current one. Thresholds, scores, presets and limits change only at the monthly review (next: Nov 8) — never mid-month and never because of a recent loss. <B>Amendment, Oct 28</B> (your call, made knowingly mid-month): sector points now include the parent sector’s rank, and VIX elevated and rising turns a green gate to caution — so v1 stats before and after Oct 28 mix two scoring versions; read the Nov 8 review with that in mind. At the review: look at the process score, the Edge panel and the track record; change at most one or two things; bump the version.</P>
           </S>
 
           <S id="limits-of" title="What it can’t tell you">
