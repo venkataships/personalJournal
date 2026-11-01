@@ -103,8 +103,7 @@ export default function Guide() {
               ['Top Setups', <>Top 5 qualified PDH breakouts/retests; “Show all” lists every qualified name (sortable, with Det). <A to="setups">Score</A></>],
               ['Focus list', <>Up to 9 names you pick, tracked for the “Undercut ✓” pattern. <A to="focus">Rule</A></>],
               ['Top-down', <>Market check, the 11 sectors ranked, themes in the leaders. <A to="topdown">How</A></>],
-              ['Your watchlist, top-down', <>Your watchlist categories ranked the same way, plus the strongest names in the top groups. <A to="wl-groups">How</A></>],
-              ['Group cards', <>Since Oct 31, your watchlist categories (in rank order): sector ETF strip, then each ticker’s 1/5/20-day return, vs SPY, PDH/PDL event, phase, 8/21, Det, volume.</>],
+              ['Your watchlist, top-down', <>Your watchlist categories ranked the same way, plus the strongest names in the top groups. (The per-group detail tables were removed Oct 31 — the Watchlist page has every name.) <A to="wl-groups">How</A></>],
               ['Catalysts', <>Type an event (“NVDA GTC Oct 20-22”); tickers with one inside 3 weeks get a ⚡ tag across the page. Read by rules, no AI.</>],
               ['Rotation map', <>Groups plotted by 5-day vs 20-day strength against SPY — the phase quadrants.</>],
             ]} />

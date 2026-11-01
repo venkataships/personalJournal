@@ -88,7 +88,7 @@ export default function WatchlistRanking({ groups }) {
                     <td className="py-1 pr-2 font-mono tabular-nums text-neutral-500">{g.rank}</td>
                     <td className="py-1 pr-2">
                       <span className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle ${g.tier === 'top' ? 'bg-emerald-400' : g.tier === 'bottom' ? 'bg-rose-400' : 'bg-neutral-600'}`} />
-                      <a href={`#group-${encodeURIComponent(g.name)}`} className="text-neutral-100 hover:text-emerald-300">{g.name}</a>
+                      <span className="text-neutral-100">{g.name}</span>
                       <span className="ml-1 text-[10px] text-neutral-600">{g.count}</span>
                     </td>
                     <td className="py-1 pr-2 font-mono text-[11px] text-neutral-500">{g.ref_etf || '—'}</td>

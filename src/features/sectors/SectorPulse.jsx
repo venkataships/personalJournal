@@ -322,14 +322,6 @@ export default function SectorPulse() {
             {/* Top setups */}
             {row.setups && <TopSetups setups={row.setups} market={row.risk?.state !== undefined ? row.risk : null} inTrade={state.inTrade} />}
 
-            {/* Groups */}
-            <section className="space-y-4">
-              {groups.map((g, i) => (
-                <div key={g.name} id={`group-${encodeURIComponent(g.name)}`} className="scroll-mt-16">
-                  <GroupCard group={g} rank={i + 1} total={groups.length} inTrade={state.inTrade} />
-                </div>
-              ))}
-            </section>
 
             {missing.length > 0 && (
               <p className="mt-3 text-[12px] text-neutral-600">
@@ -428,18 +420,6 @@ function QuadrantChip({ q, compact, note }) {
   );
 }
 
-function FlowTag({ flow, rvol }) {
-  if (!flow) return rvol >= 1.2 ? <span className="font-mono text-neutral-500">{rvol}x</span> : <span className="text-neutral-800">·</span>;
-  const inflow = flow === 'inflow';
-  const Icon = inflow ? TrendingUp : TrendingDown;
-  return (
-    <span className={`inline-flex items-center gap-1 font-mono ${inflow ? 'text-emerald-400' : 'text-rose-400'}`}>
-      <Icon className="h-3 w-3" strokeWidth={2} />
-      {rvol}x
-    </span>
-  );
-}
-
 function InTradeTag() {
   return (
     <Link to="/journal" title="You have an open journal trade in this ticker"
@@ -454,96 +434,6 @@ function logLink(p) {
   if (p.price != null) q.set('price', String(p.price));
   if (p.invalid_below != null) q.set('stop', String(p.invalid_below));
   return `/journal?${q.toString()}`;
-}
-
-function GroupCard({ group: g, rank, total, inTrade }) {
-  const edge = rank === 1 ? 'Strongest' : rank === total && total > 1 ? 'Weakest' : null;
-  return (
-    <div className="overflow-hidden rounded-md border border-neutral-800 bg-neutral-950/40">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-neutral-900 px-4 py-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-[15px] font-medium text-neutral-100">{g.name}</h2>
-            <QuadrantChip q={g.quadrant} note={g.phase_note} />
-            {edge && <span className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">{edge}</span>}
-          </div>
-          <div className="mt-1 font-mono text-[11px] tabular-nums text-neutral-500">
-            {g.up}/{g.count} green
-            {g.ema_known > 0 && <> · {g.above_ema20}/{g.ema_known} above 20-day avg</>}
-            {(g.above_pdh > 0 || g.below_pdl > 0) && (
-              <> · <span className="text-emerald-400">{g.above_pdh} above PDH</span>
-                {' '}/ <span className="text-rose-400">{g.below_pdl} below PDL</span></>
-            )}
-            {' '}· vs SPY 5d <span className={pctClass(g.rs5)}>{pct(g.rs5)}</span>
-            {' '}· 20d <span className={pctClass(g.rs20)}>{pct(g.rs20)}</span>
-          </div>
-        </div>
-      </div>
-
-      {g.ref && <SectorStrip g={g} />}
-
-      {g.count === 0 ? (
-        <div className="px-4 py-3 text-[12px] text-neutral-600">No price data for any ticker in this group.</div>
-      ) : (
-        <div>
-          <table className="w-full table-fixed text-[12px]">
-            <colgroup>
-              <col className="w-[17%] sm:w-[9%]" />
-              <col className="w-[19%] sm:w-[8%]" />
-              <col className="w-[17%] sm:w-[7%]" />
-              <col className="hidden sm:table-column sm:w-[7%]" />
-              <col className="hidden sm:table-column sm:w-[7%]" />
-              <col className="hidden sm:table-column sm:w-[9%]" />
-              <col className="w-[25%] sm:w-[19%]" />
-              <col className="w-[22%] sm:w-[12%]" />
-              <col className="hidden sm:table-column sm:w-[5%]" />
-              <col className="hidden sm:table-column sm:w-[7%]" />
-              <col className="hidden sm:table-column sm:w-[10%]" />
-            </colgroup>
-            <thead>
-              <tr className="text-left text-[10px] uppercase tracking-wider text-neutral-600">
-                <th className="pl-4 pr-2 py-2 font-normal">Ticker</th>
-                <th className="px-2 py-2 text-right font-normal">Price</th>
-                <th className="px-2 py-2 text-right font-normal">1d</th>
-                <th className="hidden sm:table-cell px-2 py-2 text-right font-normal">5d</th>
-                <th className="hidden sm:table-cell px-2 py-2 text-right font-normal">20d</th>
-                <th className="hidden sm:table-cell whitespace-nowrap px-2 py-2 text-right font-normal" title="5-day return minus SPY's">vs SPY 5d</th>
-                <th className="pl-3 pr-2 py-2 font-normal" title="Price vs the previous day's high (PDH) and low (PDL)">vs PDH/PDL</th>
-                <th className="pl-2 pr-2 py-2 font-normal">Phase</th>
-                <th className="hidden sm:table-cell px-1 py-2 text-center font-normal" title="Daily 8 EMA vs 21 EMA — ▲ 8 over 21 and price above (buyers in control) · ▼ sellers in control · ~ mixed">8/21</th>
-                <th className="hidden sm:table-cell px-2 py-2 text-center font-normal" title="Deterioration 0-5 — shown at 2+ (hover for the signs)">Det</th>
-                <th className="hidden sm:table-cell pr-4 py-2 font-normal" title="Volume vs 20-day average">Vol</th>
-              </tr>
-            </thead>
-            <tbody>
-              {g.members.map((m) => (
-                <tr key={m.ticker} className="border-t border-neutral-900 hover:bg-neutral-900/40">
-                  <td className="whitespace-nowrap pl-4 pr-2 py-2 font-mono font-medium text-neutral-100">
-                    <Link to={`/lookup/${m.ticker}`} title={`Technicals for ${m.ticker}`} className="hover:text-emerald-300 hover:underline">{m.ticker}</Link>{inTrade?.has(m.ticker) && <span className="hidden sm:inline"><InTradeTag /></span>}<CatTag ticker={m.ticker} />
-                  </td>
-                  <td className="px-2 py-2 text-right font-mono tabular-nums text-neutral-300">{m.price?.toFixed(2)}</td>
-                  <td className={`px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.r1)}`}>{pct(m.r1, 2)}</td>
-                  <td className={`hidden sm:table-cell px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.r5)}`}>{pct(m.r5)}</td>
-                  <td className={`hidden sm:table-cell px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.r20)}`}>{pct(m.r20)}</td>
-                  <td className={`hidden sm:table-cell px-2 py-2 text-right font-mono tabular-nums ${pctClass(m.rs5)}`}>{pct(m.rs5)}</td>
-                  <td className="whitespace-nowrap pl-3 pr-4 py-2"><PdCell m={m} /></td>
-                  <td className="whitespace-nowrap pl-2 pr-2 py-2"><QuadrantChip q={m.quadrant} compact note={m.phase_note} /></td>
-                  <td className="hidden sm:table-cell px-1 py-2 text-center"><EmaTag m={m} compact /></td>
-                  <td className="hidden sm:table-cell px-2 py-2 text-center">{m.deterioration?.score >= 2 ? <DetChip d={m.deterioration} compact /> : <span className="text-neutral-700">—</span>}</td>
-                  <td className="hidden sm:table-cell whitespace-nowrap pl-2 pr-4 py-2"><FlowTag flow={m.flow} rvol={m.rvol} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      {g.missing?.length > 0 && g.count > 0 && (
-        <div className="border-t border-neutral-900 px-4 py-2 text-[11px] text-neutral-600">
-          No data: <span className="font-mono">{g.missing.join(', ')}</span>
-        </div>
-      )}
-    </div>
-  );
 }
 
 // Previous-day high/low. Color is always paired with a text label.
@@ -591,21 +481,6 @@ function PdBar({ m }) {
       <line x1="80" y1="2" x2="80" y2="10" stroke="#737373" strokeWidth="1.5" />
       <circle cx={Math.max(4, Math.min(96, x))} cy="6" r="4" fill={dot} stroke="#0a0a0a" strokeWidth="1.5" />
     </svg>
-  );
-}
-
-function PdCell({ m }) {
-  if (!m.pd_state) return <span className="text-neutral-700">—</span>;
-  return (
-    <div className="flex items-center gap-2">
-      {m.retest ? <RetestChip m={m} /> : <PdChip m={m} />}
-      {m.hh_hl_streak >= 2 && (
-        <span className="hidden sm:inline font-mono text-[10px] text-emerald-500" title={`${m.hh_hl_streak} days of higher highs & higher lows`}>↗{m.hh_hl_streak}d</span>
-      )}
-      {m.hh_hl_streak <= -2 && (
-        <span className="hidden sm:inline font-mono text-[10px] text-rose-500" title={`${-m.hh_hl_streak} days of lower highs & lower lows`}>↘{-m.hh_hl_streak}d</span>
-      )}
-    </div>
   );
 }
 
@@ -739,43 +614,6 @@ function IndexCard({ sym, m }) {
         </div>
       )}
       {ibText && <div className="mt-1 text-[11px] text-amber-300/80">{ibText}</div>}
-    </div>
-  );
-}
-
-function SectorStrip({ g }) {
-  const r = g.ref;
-  const vs = g.vs_ref || {};
-  const verdict = vs.r5 == null ? null
-    : vs.r5 >= 0.5 ? 'Your picks are beating the sector'
-    : vs.r5 <= -0.5 ? 'The ETF is beating your picks'
-    : 'Your picks are tracking the sector';
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-neutral-900 bg-neutral-900/30 px-4 py-2.5 text-[12px]">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">Sector</span>
-        <span className="font-mono font-medium text-neutral-100">{r.symbol}</span>
-        <span className="font-mono tabular-nums text-neutral-400">
-          <span className={pctClass(r.r1)}>{pct(r.r1, 2)}</span> 1d · <span className={pctClass(r.r5)}>{pct(r.r5)}</span> 5d
-          {' '}· <span className={pctClass(r.r20)}>{pct(r.r20)}</span> 20d
-        </span>
-        <QuadrantChip q={r.quadrant} note={r.phase_note} />
-        {r.pd_state && <PdChip m={r} />}
-        {r.ema_trend ? (
-          <span className="inline-flex items-center gap-1 text-neutral-500">8/21 <EmaTag m={r} /></span>
-        ) : r.above_ema20 != null && (
-          <span className="text-neutral-500">{r.above_ema20 ? 'above' : 'below'} 20-day avg</span>
-        )}
-        <RetestChip m={r} />
-        <DetChip d={r.deterioration} />
-      </div>
-      {verdict && (
-        <div className="font-mono tabular-nums text-neutral-400" title="Median of your picks minus the ETF's return">
-          <span className="font-sans text-neutral-500">{verdict}: </span>
-          <span className={pctClass(vs.r5)}>{vs.r5 > 0 ? '+' : ''}{vs.r5?.toFixed(1)} pts</span> 5d
-          {vs.r20 != null && <> · <span className={pctClass(vs.r20)}>{vs.r20 > 0 ? '+' : ''}{vs.r20.toFixed(1)} pts</span> 20d</>}
-        </div>
-      )}
     </div>
   );
 }
