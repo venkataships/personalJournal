@@ -10,7 +10,7 @@ const TOC = [
   ['Start here', [['overview', 'What this is'], ['zone', 'Trading in the zone'], ['flow', 'How data moves'], ['day', 'Your day']]],
   ['Pages', [['sectors', 'Sectors'], ['lookup', 'Lookup'], ['plan', 'Plan a trade'], ['ai-notes', 'Notes & alerts'], ['alerts', 'Alerts'],
     ['playbook', 'Playbook'], ['journal', 'Journal'], ['system', 'System trader'], ['watchlist', 'Watchlist'], ['other-pages', 'Today, Positions, Intelligence']]],
-  ['Rules', [['topdown', 'Top-down'], ['pdh', 'PDH / PDL events'], ['retest', 'Retest'], ['ema', '8/21 trend'], ['phase', 'Phase vs SPY'], ['gate', 'Market gate'],
+  ['Rules', [['topdown', 'Top-down'], ['wl-groups', 'Watchlist groups'], ['focus', 'Focus list & Undercut ✓'], ['pdh', 'PDH / PDL events'], ['retest', 'Retest'], ['ema', '8/21 trend'], ['phase', 'Phase vs SPY'], ['gate', 'Market gate'],
     ['setups', 'Top Setups score'], ['det', 'Deterioration'], ['volume', 'Volume & streaks'], ['events', 'Event rules'],
     ['sizing', 'Sizing multipliers'], ['limits', 'Risk limits'], ['checklist', 'Journal checklist'],
     ['exit-plan', 'Exit plans'], ['tilt', 'Tilt guards'], ['edge', 'Process & edge'], ['track', 'Top Setups track record'], ['reversal', 'Reversal study'], ['freeze', 'Rules v1 & the monthly review']]],
@@ -101,7 +101,10 @@ export default function Guide() {
               ['Market gate', <>SPY and QQQ trend, with each index’s PDH/PDL, break and retest. Sets a score penalty for every setup. <A to="gate">Rules</A></>],
               ['AI brief', <>Stance + headline; expand for positions, opportunities, watch levels. <A to="ai-notes">How it’s written</A></>],
               ['Top Setups', <>Top 5 qualified PDH breakouts/retests; “Show all” lists every qualified name (sortable, with Det). <A to="setups">Score</A></>],
-              ['Group cards', <>Your pulse groups ranked vs SPY: sector ETF strip, then each ticker’s 1/5/20-day return, vs SPY, PDH/PDL event, phase, 8/21, Det, volume.</>],
+              ['Focus list', <>Up to 9 names you pick, tracked for the “Undercut ✓” pattern. <A to="focus">Rule</A></>],
+              ['Top-down', <>Market check, the 11 sectors ranked, themes in the leaders. <A to="topdown">How</A></>],
+              ['Your watchlist, top-down', <>Your watchlist categories ranked the same way, plus the strongest names in the top groups. <A to="wl-groups">How</A></>],
+              ['Group cards', <>Since Oct 31, your watchlist categories (in rank order): sector ETF strip, then each ticker’s 1/5/20-day return, vs SPY, PDH/PDL event, phase, 8/21, Det, volume.</>],
               ['Catalysts', <>Type an event (“NVDA GTC Oct 20-22”); tickers with one inside 3 weeks get a ⚡ tag across the page. Read by rules, no AI.</>],
               ['Rotation map', <>Groups plotted by 5-day vs 20-day strength against SPY — the phase quadrants.</>],
             ]} />
@@ -259,6 +262,28 @@ export default function Guide() {
               ['3 · Themes', 'Theme ETFs (SMH, SOXX, AIQ, BAI, CIBR, DRAM, IGV, BOTZ, QTUM, MAGS → XLK; ITA, SHLD, PAVE, GRID, UFO → XLI; NLR, ICLN → XLU; URA → XLE; REMX → XLB) shown under the leading sectors, ranked the same way, with your groups that use them.'],
               ['4 · Setups in the leaders', 'Qualified setups whose theme sits in a top-4 sector. They also get the +5 sector-rank points in the score.'],
               ['If it’s weak', 'Market or sectors weak → smaller size (the gate and Plan-a-trade multipliers) or cash. Nothing qualifying is an answer too.'],
+            ]} />
+          </S>
+
+          <S id="wl-groups" title="Watchlist groups">
+            <P>Since Oct 31 the groups on Sectors are your watchlist categories, not hand-made lists. A category with one name goes to “Other”; the macro category isn’t a group. Each group’s ETF comes from its category (semis → SMH, memory → DRAM, big-tech → MAGS, nuclear → URA, space → UFO, quantum → QTUM, defense → ITA, …). Names that were only in the old groups (Mag Tech, Space, Semis, Memory) are no longer scanned unless they’re on the watchlist.</P>
+            <Defs items={[
+              ['Rank', 'Median 5-day + 20-day return of the group’s names minus SPY’s. Top third (max 3) green, bottom third red; the arrow is the rank change over 5 sessions, and 3+ places is flagged as rotation.'],
+              ['Strongest names', 'Inside the top groups: names that are Leading or Improving vs SPY with 8/21 up, best 5-day strength first, up to 3 per group.'],
+              ['Scoring', 'Unchanged: setups still use the group’s ETF for sector points (and its parent sector’s rank).'],
+            ]} />
+          </S>
+
+          <S id="focus" title="Focus list & Undercut ✓">
+            <P>Your own 7–9 names (add or remove them at the top of Sectors). Every 15-minute pulse reads today’s 15-minute bars for each one:</P>
+            <Defs items={[
+              ['Opening print', 'The first bar’s open (9:30).'],
+              ['Morning low', 'The lowest low of the first 30 minutes (two 15-min bars). This is the invalidation.'],
+              ['Undercut', 'The morning low is below the opening print — the open got flushed.'],
+              ['Reclaim', 'After 10:00, a 15-min bar closes above the opening print or VWAP (whichever is lower) on rising volume: more than the bar before AND at least the average of the bars since 10:00 (the opening bars are always heavy, so they’re left out).'],
+              ['Undercut ✓', 'Undercut + reclaim. The card shows the reclaim time, the volume multiple and how far price is above the morning low. An alert posts once.'],
+              ['Other states', 'Opening range (before 10:00) · Held the open (never undercut — no setup) · Watching (undercut, no reclaim yet) · Broke morning low (lost it before reclaiming — no setup) · Lost the low (reclaimed, then broke the morning low — invalidated; alert posts).'],
+              ['What it isn’t', 'Information only: it doesn’t enter Top Setups or the paper trader. 15-min bars arrive with a delay, so a reclaim shows up to 15 minutes late. VWAP is built from 15-min bars, so it is an approximation.'],
             ]} />
           </S>
 

@@ -16,6 +16,8 @@ const ALERT_TYPES = {
   trim: { label: 'Trim', cls: 'border-sky-500/40 bg-sky-500/10 text-sky-300' },
   trail: { label: 'Trail', cls: 'border-amber-500/40 bg-amber-500/10 text-amber-300' },
   time: { label: 'Time stop', cls: 'border-amber-500/40 bg-amber-500/10 text-amber-300' },
+  undercut: { label: 'Undercut ✓', cls: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' },
+  undercut_fail: { label: 'Lost the low', cls: 'border-rose-500/40 bg-rose-500/10 text-rose-300' },
 };
 
 // "🎯 Setup ready: MU (#1, score 78)" -> "MU (#1, score 78)"; strips the leading emoji/label the chip already shows.

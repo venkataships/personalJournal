@@ -3,6 +3,8 @@ import HelpLink from '../../components/HelpLink';
 import DetChip from '../../components/DetChip';
 import { TodayAlerts } from '../alerts/Alerts';
 import TopDown from './TopDown';
+import WatchlistRanking from './WatchlistRanking';
+import FocusList from './FocusList';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft, AlertCircle, RefreshCw, TrendingUp, TrendingDown, Radar,
@@ -212,9 +214,11 @@ export default function SectorPulse() {
                 className="rounded border border-neutral-800 p-2 text-neutral-400 hover:border-emerald-500/40 hover:text-emerald-400">
                 <BookText className="h-4 w-4" strokeWidth={1.75} />
               </Link>
-              <IconButton label="Edit groups" onClick={() => setEditing((v) => !v)} active={editing}>
-                <Pencil className="h-4 w-4" strokeWidth={1.75} />
-              </IconButton>
+              {!groups.some((g) => g.rank != null) && (
+                <IconButton label="Edit groups" onClick={() => setEditing((v) => !v)} active={editing}>
+                  <Pencil className="h-4 w-4" strokeWidth={1.75} />
+                </IconButton>
+              )}
               <button type="button" onClick={recalculate} disabled={recalc === 'waiting'}
                 title="Run a fresh pulse now (the bot picks it up within a minute; takes ~1-2 min)"
                 className="inline-flex items-center gap-1.5 rounded border border-neutral-800 px-2.5 py-2 text-[12px] text-neutral-400 hover:border-emerald-500/40 hover:text-emerald-300 disabled:opacity-70">
@@ -269,6 +273,9 @@ export default function SectorPulse() {
         {/* Alerts on your rules (bot: alerts.py) */}
         <TodayAlerts />
 
+        {/* Your focus list (up to 9) with the Undercut ✓ tag */}
+        <FocusList focus={row?.focus} session={row?.session} />
+
         {/* AI brief + today's notes (hidden until the bot has written one) */}
         <AiNotes brief={state.brief} events={state.notes} session={row?.session} />
 
@@ -309,12 +316,19 @@ export default function SectorPulse() {
             {/* Top-down: market check → sectors → themes → setups in the leaders */}
             <TopDown market={row.risk} groups={groups} setups={row.setups} />
 
+            {/* The same read for your watchlist categories */}
+            <WatchlistRanking groups={groups} />
+
             {/* Top setups */}
             {row.setups && <TopSetups setups={row.setups} market={row.risk?.state !== undefined ? row.risk : null} inTrade={state.inTrade} />}
 
             {/* Groups */}
             <section className="space-y-4">
-              {groups.map((g, i) => <GroupCard key={g.name} group={g} rank={i + 1} total={groups.length} inTrade={state.inTrade} />)}
+              {groups.map((g, i) => (
+                <div key={g.name} id={`group-${encodeURIComponent(g.name)}`} className="scroll-mt-16">
+                  <GroupCard group={g} rank={i + 1} total={groups.length} inTrade={state.inTrade} />
+                </div>
+              ))}
             </section>
 
             {missing.length > 0 && (
