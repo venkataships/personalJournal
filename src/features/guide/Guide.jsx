@@ -105,7 +105,7 @@ export default function Guide() {
               ['Top-down', <>Market check, the 11 sectors ranked, themes in the leaders. <A to="topdown">How</A></>],
               ['Your watchlist, top-down', <>Your watchlist categories ranked the same way, plus the strongest names in the top groups. (The per-group detail tables were removed Oct 31 — the Watchlist page has every name.) <A to="wl-groups">How</A></>],
               ['Catalysts', <>Type an event (“NVDA GTC Oct 20-22”); tickers with one inside 3 weeks get a ⚡ tag across the page. Read by rules, no AI.</>],
-              ['Rotation map', <>Groups plotted by 5-day vs 20-day strength against SPY — the phase quadrants.</>],
+              ['Rotation map', <>Your watchlist groups (circles, median of their names) and focus-list names (diamonds), plotted by 5-day vs 20-day strength against SPY — the phase quadrants. Under the watchlist ranking, collapsed by default.</>],
             ]} />
           </S>
 

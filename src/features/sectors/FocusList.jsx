@@ -118,7 +118,7 @@ export default function FocusList({ focus, session }) {
         <div className="grid gap-px border-t border-neutral-900 bg-neutral-900 sm:grid-cols-2 lg:grid-cols-3">
           {picks.rows.map((p) => {
             const f = byTicker.get(p.ticker);
-            const st = f ? STATUS[f.status] || STATUS.no_data : null;
+            const st = f?.status ? STATUS[f.status] || STATUS.no_data : null;
             return (
               <div key={p.id} className={`bg-[#0b0b0b] px-3 py-2.5 ${f?.status === 'undercut_ok' ? 'ring-1 ring-inset ring-emerald-500/30' : ''}`}>
                 <div className="flex items-center justify-between gap-2">
@@ -132,7 +132,7 @@ export default function FocusList({ focus, session }) {
                       className="rounded p-0.5 text-neutral-600 hover:text-rose-300"><X className="h-3.5 w-3.5" /></button>
                   </span>
                 </div>
-                {f && f.status !== 'no_data' ? (
+                {f && f.status && f.status !== 'no_data' ? (
                   <>
                     <div className="mt-1 grid grid-cols-3 gap-1 font-mono text-[11px] tabular-nums">
                       <span><span className="text-neutral-600">open</span> <span className="text-neutral-300">{f.open}</span></span>
@@ -146,7 +146,7 @@ export default function FocusList({ focus, session }) {
                   </>
                 ) : (
                   <div className="mt-1 text-[11px] text-neutral-600">
-                    {session === 'regular' || session === 'afterhours' ? explain(f || { status: 'no_data' }) : 'Tracked from 9:30 ET on market days.'}
+                    {(session === 'regular' || session === 'afterhours') && f?.status ? explain(f) : 'Tracked from 9:30 ET on market days.'}
                   </div>
                 )}
               </div>

@@ -319,6 +319,24 @@ export default function SectorPulse() {
             {/* The same read for your watchlist categories */}
             <WatchlistRanking groups={groups} />
 
+            {/* Rotation map (collapsed by default) */}
+            {(groups.some((g) => g.rank != null) || (row.focus || []).length > 0) && (
+              <section className="mb-6">
+                <button
+                  onClick={() => setShowMap((v) => !v)}
+                  aria-expanded={showMap}
+                  className="flex w-full items-center justify-between rounded-md border border-neutral-800 px-4 py-3 text-left hover:border-neutral-700"
+                >
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">Rotation map</div>
+                    <div className="mt-0.5 text-[12px] text-neutral-600">Your watchlist groups and focus list, by 5-day vs 20-day strength against SPY</div>
+                  </div>
+                  {showMap ? <ChevronUp className="h-4 w-4 text-neutral-500" /> : <ChevronDown className="h-4 w-4 text-neutral-500" />}
+                </button>
+                {showMap && <RotationMap groups={groups} focus={row.focus || []} />}
+              </section>
+            )}
+
             {/* Top setups */}
             {row.setups && <TopSetups setups={row.setups} market={row.risk?.state !== undefined ? row.risk : null} inTrade={state.inTrade} />}
 
@@ -333,23 +351,6 @@ export default function SectorPulse() {
               wlCategory={state.wlCategory || new Map()} today={today} onChange={load} />
             </CatCtx.Provider>
 
-            {/* Rotation map (collapsed by default) */}
-            {groups.length > 0 && (
-              <section className="mt-8">
-                <button
-                  onClick={() => setShowMap((v) => !v)}
-                  aria-expanded={showMap}
-                  className="flex w-full items-center justify-between rounded-md border border-neutral-800 px-4 py-3 text-left hover:border-neutral-700"
-                >
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">Rotation map</div>
-                    <div className="mt-0.5 text-[12px] text-neutral-600">Every ticker by 5-day vs 20-day strength against SPY</div>
-                  </div>
-                  {showMap ? <ChevronUp className="h-4 w-4 text-neutral-500" /> : <ChevronDown className="h-4 w-4 text-neutral-500" />}
-                </button>
-                {showMap && <RotationMap groups={groups} />}
-              </section>
-            )}
 
             <footer className="mt-8 text-center font-mono text-[10px] text-neutral-700">
               {row.coverage?.symbols_computed}/{row.coverage?.symbols_requested} symbols ·{' '}
@@ -1110,22 +1111,41 @@ function RotationTooltip({ active, payload }) {
 function Dot({ cx, cy, payload }) {
   if (cx == null || cy == null) return null;
   const color = QUADRANT[payload.quadrant]?.color || '#737373';
+  if (payload.kind === 'focus') {
+    return (
+      <g>
+        <rect x={cx - 5} y={cy - 5} width={10} height={10} transform={`rotate(45 ${cx} ${cy})`} fill={color} stroke="#e5e5e5" strokeWidth={1.25} />
+        <text x={cx + 9} y={cy + 3.5} fontSize={11} fontWeight={600} fill="#e5e5e5" fontFamily="ui-monospace, monospace">
+          {payload.ticker}
+        </text>
+      </g>
+    );
+  }
   return (
     <g>
-      <circle cx={cx} cy={cy} r={5} fill={color} stroke="#0a0a0a" strokeWidth={2} />
-      <text x={cx + 8} y={cy + 3.5} fontSize={10} fill="#a3a3a3" fontFamily="ui-monospace, monospace">
+      <circle cx={cx} cy={cy} r={7} fill={color} fillOpacity={0.85} stroke="#0a0a0a" strokeWidth={2} />
+      <text x={cx + 10} y={cy + 4} fontSize={11} fill="#a3a3a3">
         {payload.ticker}
       </text>
     </g>
   );
 }
 
-function RotationMap({ groups }) {
+function RotationMap({ groups, focus }) {
   const data = useMemo(() => {
-    const seen = new Set();
-    return groups.flatMap((g) => g.members.map((m) => ({ ...m, group: g.name })))
-      .filter((m) => m.rs5 != null && m.rs20 != null && !seen.has(m.ticker) && seen.add(m.ticker));
-  }, [groups]);
+    const members = new Map(groups.flatMap((g) => (g.members || []).map((m) => [m.ticker, { ...m, group: g.name }])));
+    const pts = groups.filter((g) => g.rank != null && g.rs5 != null && g.rs20 != null)
+      .map((g) => ({ ticker: g.name, kind: 'group', rs5: g.rs5, rs20: g.rs20, r1: g.r1, quadrant: g.quadrant, group: `#${g.rank} · ${g.count} names` }));
+    for (const f of focus) {
+      const m = members.get(f.ticker);
+      const rs5 = f.rs5 ?? m?.rs5;
+      const rs20 = f.rs20 ?? m?.rs20;
+      if (rs5 == null || rs20 == null) continue;
+      pts.push({ ticker: f.ticker, kind: 'focus', rs5, rs20, r1: f.r1 ?? m?.r1, quadrant: f.quadrant ?? m?.quadrant,
+        group: f.status === 'undercut_ok' ? 'focus · Undercut ✓' : 'focus list' });
+    }
+    return pts;
+  }, [groups, focus]);
   if (!data.length) return null;
   const bound = (key) => Math.ceil(Math.max(1, ...data.map((d) => Math.abs(d[key]))) * 1.15);
   const bx = bound('rs20');
@@ -1161,6 +1181,11 @@ function RotationMap({ groups }) {
           <Scatter data={data} shape={<Dot />} isAnimationActive={false} />
         </ScatterChart>
       </ResponsiveContainer>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 pt-1 text-[11px] text-neutral-500">
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full bg-neutral-500" /> watchlist group (median of its names)</span>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block h-2 w-2 rotate-45 border border-neutral-200 bg-neutral-500" /> focus-list name</span>
+        <span>Color = phase vs SPY.</span>
+      </div>
     </div>
   );
 }
