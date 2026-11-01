@@ -4,7 +4,7 @@ import { ChevronDown, ChevronUp, ArrowUp, ArrowDown, Minus } from 'lucide-react'
 import HelpLink from '../../components/HelpLink';
 
 // Your watchlist, read top-down like the sectors (bot: sector_pulse.watchlist_groups + rank_groups):
-// categories ranked by median 5d + 20d return vs SPY, rank change over 5 sessions, then the strongest names
+// categories ranked by median (5d + 20d/4) excess return vs SPY, rank change over 5 sessions, then the strongest names
 // inside the top groups. Phase is always shown as a text label, never color alone.
 
 const PHASE = {
@@ -46,7 +46,8 @@ export default function WatchlistRanking({ groups }) {
     return !o;
   });
   const top = ranked.filter((g) => g.tier === 'top');
-  const rotation = ranked.filter((g) => g.rank_change != null && Math.abs(g.rank_change) >= 3);
+  const step = Math.max(3, Math.round(ranked.length / 4));
+  const rotation = ranked.filter((g) => (g.rotation ?? (g.rank_change != null && Math.abs(g.rank_change) >= step)));
   // strongest names inside the top groups: Leading/Improving with 8/21 up, best 5d vs SPY first
   const leaders = top.flatMap((g) => (g.members || [])
     .filter((m) => ['Leading', 'Improving'].includes(m.quadrant) && m.ema_trend === 'up')
@@ -119,6 +120,7 @@ export default function WatchlistRanking({ groups }) {
               </div>
             )}
           </div>
+          <p className="mt-1.5 text-[11px] text-neutral-600">Rank = 5-day lead over SPY + ¼ of the 20-day lead (each week counts the same). Green = top 3 and Leading/Improving; red = bottom 3. Rotation = moved {step}+ places in 5 sessions.</p>
           <p className="mt-2 text-[11px] text-neutral-600">Groups are your watchlist categories (a category with one name goes to Other). Edit them on the <Link to="/watchlist" className="text-emerald-300/80 hover:underline">Watchlist</Link>.</p>
         </div>
       )}

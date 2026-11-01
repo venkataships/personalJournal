@@ -129,7 +129,7 @@ export default function TopDown({ market, groups, setups }) {
             {td.notes?.length > 0 && <p className="mt-2 text-[12px] leading-relaxed text-neutral-500">{td.notes.join(' · ')}.</p>}
           </Step>
 
-          <Step n="2" title="Sector ranking" hint="11 sectors vs SPY (5d + 20d) · arrows = change in rank over 5 sessions">
+          <Step n="2" title="Sector ranking" hint="11 sectors vs SPY (5d + ¼ of 20d) · arrows = change in rank over 5 sessions">
             {td.rotation?.length > 0 && (
               <div className="mb-2 rounded border border-sky-500/30 bg-sky-500/5 px-2.5 py-1.5 text-[12px] text-sky-200">
                 Rotation: {td.rotation.map((r) => `${r.symbol} ${r.rank_change > 0 ? 'up' : 'down'} ${Math.abs(r.rank_change)} to #${r.rank}`).join(' · ')}
@@ -165,7 +165,7 @@ export default function TopDown({ market, groups, setups }) {
                 </tbody>
               </table>
             </div>
-            <p className="mt-1.5 text-[11px] text-neutral-600">Green dot = top {top.length} (setups there get +5 sector points), red = bottom 3 (+0).</p>
+            <p className="mt-1.5 text-[11px] text-neutral-600">Green dot = top 4 that are Leading/Improving ({top.length} now; setups there get +5 sector points), red = bottom 3 (+0).</p>
           </Step>
 
           <Step n="3" title="Themes inside the leaders" hint={leaders ? `themes whose parent is ${leaders}` : ''}>

@@ -257,7 +257,7 @@ export default function Guide() {
             <P>The panel at the top of Sectors runs a 20-minute morning routine from the snapshot. It finds nothing new — the universe is still your groups and watchlist — it tells you where to look first.</P>
             <Defs items={[
               ['1 · Market check', 'SPY uptrend = 8 EMA over 21 with price above and the 21 EMA higher than 5 sessions ago. QQQ vs SPY (growth risk-on or off) and IWM vs SPY (broad or mega-cap-only) use the same phase rules as everything else. VIX: under 15 subdued, 20+ elevated; elevated and up 10%+ in 5 sessions turns a green gate to caution.'],
-              ['2 · Sector ranking', 'The 11 Select Sector SPDRs ranked by 5-day + 20-day return minus SPY’s. Top 4 green, bottom 3 red. The arrow is the change in rank versus 5 sessions ago; a move of 3+ places is flagged as rotation.'],
+              ['2 · Sector ranking', 'The 11 Select Sector SPDRs ranked by the 5-day lead over SPY plus a quarter of the 20-day lead (since Oct 31, so each week counts the same — before, the 20-day number dominated). Top 4 that are also Leading or Improving are green (a lagging sector can’t be a leader); bottom 3 red. The arrow is the change in rank versus 5 sessions ago; a move of 3+ places is flagged as rotation.'],
               ['3 · Themes', 'Theme ETFs (SMH, SOXX, AIQ, BAI, CIBR, DRAM, IGV, BOTZ, QTUM, MAGS → XLK; ITA, SHLD, PAVE, GRID, UFO → XLI; NLR, ICLN → XLU; URA → XLE; REMX → XLB) shown under the leading sectors, ranked the same way, with your groups that use them.'],
               ['4 · Setups in the leaders', 'Qualified setups whose theme sits in a top-4 sector. They also get the +5 sector-rank points in the score.'],
               ['If it’s weak', 'Market or sectors weak → smaller size (the gate and Plan-a-trade multipliers) or cash. Nothing qualifying is an answer too.'],
@@ -267,7 +267,7 @@ export default function Guide() {
           <S id="wl-groups" title="Watchlist groups">
             <P>Since Oct 31 the groups on Sectors are your watchlist categories, not hand-made lists. A category with one name goes to “Other”; the macro category isn’t a group. Each group’s ETF comes from its category (semis → SMH, memory → DRAM, big-tech → MAGS, nuclear → URA, space → UFO, quantum → QTUM, defense → ITA, …). Names that were only in the old groups (Mag Tech, Space, Semis, Memory) are no longer scanned unless they’re on the watchlist.</P>
             <Defs items={[
-              ['Rank', 'Median 5-day + 20-day return of the group’s names minus SPY’s. Top third (max 3) green, bottom third red; the arrow is the rank change over 5 sessions, and 3+ places is flagged as rotation.'],
+              ['Rank', 'Median of the group’s names: 5-day lead over SPY plus a quarter of the 20-day lead. Top third (max 3) green only if the group is Leading or Improving; bottom third red. The arrow is the rank change over 5 sessions; rotation = a move of about a quarter of the list (at least 3 places).'],
               ['Strongest names', 'Inside the top groups: names that are Leading or Improving vs SPY with 8/21 up, best 5-day strength first, up to 3 per group.'],
               ['Scoring', 'Unchanged: setups still use the group’s ETF for sector points (and its parent sector’s rank).'],
             ]} />
@@ -300,7 +300,7 @@ export default function Guide() {
             <Table head={['Points', 'Max', 'How']} rows={[
               ['Volume', '25', '2x avg 25 · 1.3x 18 · 1x 8 · retests get at least 12 (pullbacks are quiet)'],
               ['5d vs SPY', '20', '4 per point ahead of SPY, capped'],
-              ['Sector', '15', 'Since Oct 28: theme ETF Leading 10 · Improving 7 · In line/unknown 3 · Weakening 0, plus its parent sector’s rank among the 11: top 4 +5 · middle (or no parent) +2 · bottom 3 +0. Without top-down data: the old scale (15 / 10 / 5 / 0).'],
+              ['Sector', '15', 'Since Oct 28: theme ETF Leading 10 · Improving 7 · In line/unknown 3 · Weakening 0, plus its parent sector’s rank among the 11: top 4 and Leading/Improving +5 · middle (or no parent) +2 · bottom 3 +0. Without top-down data: the old scale (15 / 10 / 5 / 0).'],
               ['HH/HL streak', '15', '3+ days 15 · 2 days 10 · 1 day 5'],
               ['Entry', '15', 'held retest 15 (8 if sitting on the level) · break within 2% of PDH 10 · within 4% 5'],
               ['Not extended', '10', '≤ 8% above the 20-day EMA 10 · ≤ 15% 4'],
@@ -427,7 +427,7 @@ export default function Guide() {
           </S>
 
           <S id="freeze" title="Rules v1 & the monthly review">
-            <P>Rules v1 took effect Oct 11, 2026. Every trade is tagged with its ruleset, and the Edge panel only counts trades under the current one. Thresholds, scores, presets and limits change only at the monthly review (next: Nov 8) — never mid-month and never because of a recent loss. <B>Amendment, Oct 28</B> (your call, made knowingly mid-month): sector points now include the parent sector’s rank, and VIX elevated and rising turns a green gate to caution — so v1 stats before and after Oct 28 mix two scoring versions; read the Nov 8 review with that in mind. At the review: look at the process score, the Edge panel and the track record; change at most one or two things; bump the version.</P>
+            <P>Rules v1 took effect Oct 11, 2026. Every trade is tagged with its ruleset, and the Edge panel only counts trades under the current one. Thresholds, scores, presets and limits change only at the monthly review (next: Nov 8) — never mid-month and never because of a recent loss. <B>Amendment, Oct 28</B> (your call, made knowingly mid-month): sector points now include the parent sector’s rank, and VIX elevated and rising turns a green gate to caution. <B>Oct 31</B>: that rank became 5-day + ¼ of 20-day, and only Leading/Improving sectors can be top — so v1 stats before and after Oct 28 mix two scoring versions; read the Nov 8 review with that in mind. At the review: look at the process score, the Edge panel and the track record; change at most one or two things; bump the version.</P>
           </S>
 
           <S id="limits-of" title="What it can’t tell you">
