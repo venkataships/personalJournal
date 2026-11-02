@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Crosshair, X, Plus, AlertCircle } from 'lucide-react';
+import { Crosshair, X, Plus, AlertCircle, RefreshCw } from 'lucide-react';
+import { undercut } from '../../lib/undercut';
 import { supabase, authReady } from '../../lib/supabase';
 import HelpLink from '../../components/HelpLink';
 
@@ -11,6 +12,12 @@ const MAX = 9;
 const PRICES_FROM = 8 * 60;        // live quotes from 8:00 ET on weekdays (pre-market mid, then last trade)
 const PRICES_UNTIL = 20 * 60;
 const UNDERCUT_FROM = 9 * 60 + 30;
+const BARS_UNTIL = 16 * 60 + 15;   // last 15-min bar lands just after the close
+const RATES = [['off', 'Off'], ['60', '1 min'], ['15', '15 s']];
+const RATE_KEY = 'focus.refresh';
+function readRate() {
+  try { const v = window.localStorage.getItem(RATE_KEY); return RATES.some(([k]) => k === v) ? v : '60'; } catch { return '60'; }
+}
 
 // Weekday and minutes since midnight in New York.
 function etClock(d = new Date()) {
@@ -97,31 +104,54 @@ export default function FocusList({ focus, session }) {
     }
   };
 
-  // Live quotes for the focus names, every minute from 8:00 to 20:00 ET on weekdays.
+  // Live quotes (8:00–20:00 ET) and today's 15-min bars (9:30–16:15 ET) on weekdays, at the chosen rate.
+  // The Undercut status is computed here from the bars (same rule as the bot), so it doesn't wait for the
+  // 15-minute pulse; the pulse's value is the fallback.
   const tickerKey = picks.rows.map((r) => r.ticker).sort().join(',');
   const live = clock.weekday && clock.mins >= PRICES_FROM && clock.mins < PRICES_UNTIL;
+  const barsLive = clock.weekday && clock.mins >= UNDERCUT_FROM && clock.mins < BARS_UNTIL;
+  const [rate, setRateState] = useState(readRate);
+  const [calc, setCalc] = useState({});
+  const [updatedAt, setUpdatedAt] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const setRate = (v) => {
+    setRateState(v);
+    try { window.localStorage.setItem(RATE_KEY, v); } catch { /* ignore */ }
+  };
   useEffect(() => {
-    const id = setInterval(() => setClock(etClock()), 60000);
+    const id = setInterval(() => setClock(etClock()), 30000);
     return () => clearInterval(id);
   }, []);
+  const refresh = useCallback(async (withBars) => {
+    if (!tickerKey) return;
+    setRefreshing(true);
+    try {
+      const [q, b] = await Promise.all([
+        fetch(`/api/quotes?symbols=${tickerKey}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        withBars ? fetch(`/api/intraday?symbols=${tickerKey}`).then((r) => (r.ok ? r.json() : null)).catch(() => null) : null,
+      ]);
+      if (q) setQuotes(q);
+      if (b) {
+        const next = {};
+        for (const [t, bars] of Object.entries(b)) if (Array.isArray(bars) && bars.length) next[t] = undercut(bars);
+        setCalc(next);
+      }
+      setUpdatedAt(new Date());
+    } finally {
+      setRefreshing(false);
+    }
+  }, [tickerKey]);
   useEffect(() => {
     if (!tickerKey || !live) return undefined;
-    let off = false;
-    const load = async () => {
-      try {
-        const r = await fetch(`/api/quotes?symbols=${tickerKey}`);
-        if (!r.ok) return;
-        const js = await r.json();
-        if (!off) setQuotes(js || {});
-      } catch { /* optional */ }
-    };
-    load();
-    const id = setInterval(load, 60000);
-    return () => { off = true; clearInterval(id); };
-  }, [tickerKey, live]);
+    const first = setTimeout(() => refresh(barsLive), 0);
+    if (rate === 'off') return () => clearTimeout(first);
+    const id = setInterval(() => refresh(barsLive), Number(rate) * 1000);
+    return () => { clearTimeout(first); clearInterval(id); };
+  }, [tickerKey, live, barsLive, rate, refresh]);
   const preOpen = clock.weekday && clock.mins >= PRICES_FROM && clock.mins < UNDERCUT_FROM;
 
-  const byTicker = new Map((focus || []).map((f) => [f.ticker, f]));
+  const byTicker = new Map((focus || []).map((f) => [f.ticker, { ...f, ...(calc[f.ticker] || {}) }]));
+  for (const [t, c] of Object.entries(calc)) if (!byTicker.has(t)) byTicker.set(t, { ticker: t, ...c });
   const full = picks.rows.length >= MAX;
 
   return (
@@ -131,6 +161,19 @@ export default function FocusList({ focus, session }) {
           <Crosshair className="h-3.5 w-3.5 text-emerald-400" strokeWidth={1.75} /> Focus list
           <span className="font-mono normal-case tracking-normal text-neutral-500">{picks.rows.length}/{MAX}</span>
           <HelpLink to="focus" />
+        </span>
+        <span className="flex items-center gap-1.5 text-[11px] text-neutral-500">
+          <span className="flex rounded border border-neutral-800 p-0.5" role="group" aria-label="Auto refresh">
+            {RATES.map(([k, l]) => (
+              <button key={k} type="button" onClick={() => setRate(k)} aria-pressed={rate === k}
+                className={`rounded px-1.5 py-0.5 ${rate === k ? 'bg-emerald-500/15 text-emerald-300' : 'text-neutral-500 hover:text-neutral-300'}`}>{l}</button>
+            ))}
+          </span>
+          <button type="button" onClick={() => refresh(barsLive || Object.keys(calc).length === 0)} disabled={refreshing || !tickerKey}
+            aria-label="Refresh now" title="Refresh now" className="rounded border border-neutral-800 p-1 hover:text-emerald-300 disabled:opacity-40">
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+          </button>
+          {updatedAt && <span className="font-mono tabular-nums">{updatedAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}</span>}
         </span>
         <form onSubmit={add} className="flex items-center gap-1.5">
           <input value={input} onChange={(e) => setInput(e.target.value)} disabled={busy || full || !!picks.error && !picks.rows.length && /migration/.test(picks.error)}
