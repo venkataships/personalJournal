@@ -12,7 +12,6 @@ const MAX = 9;
 const PRICES_FROM = 8 * 60;        // live quotes from 8:00 ET on weekdays (pre-market mid, then last trade)
 const PRICES_UNTIL = 20 * 60;
 const UNDERCUT_FROM = 9 * 60 + 30;
-const BARS_UNTIL = 16 * 60 + 15;   // last 15-min bar lands just after the close
 const RATES = [['off', 'Off'], ['60', '1 min'], ['15', '15 s']];
 const RATE_KEY = 'focus.refresh';
 function readRate() {
@@ -109,7 +108,7 @@ export default function FocusList({ focus, session }) {
   // 15-minute pulse; the pulse's value is the fallback.
   const tickerKey = picks.rows.map((r) => r.ticker).sort().join(',');
   const live = clock.weekday && clock.mins >= PRICES_FROM && clock.mins < PRICES_UNTIL;
-  const barsLive = clock.weekday && clock.mins >= UNDERCUT_FROM && clock.mins < BARS_UNTIL;
+  const beforeOpen = clock.mins < UNDERCUT_FROM;   // before 9:30 the latest 15-min bars are yesterday's
   const [rate, setRateState] = useState(readRate);
   const [calc, setCalc] = useState({});
   const [updatedAt, setUpdatedAt] = useState(null);
@@ -133,7 +132,19 @@ export default function FocusList({ focus, session }) {
       if (q) setQuotes(q);
       if (b) {
         const next = {};
-        for (const [t, bars] of Object.entries(b)) if (Array.isArray(bars) && bars.length) next[t] = undercut(bars);
+        for (const [t, v] of Object.entries(b)) {
+          const bars = Array.isArray(v) ? v : v?.bars;
+          let row = {};
+          if (withBars === 'today') {
+            // regular hours: today's bars -> Undercut; the session before -> PDH / PDL
+            if (bars?.length) row = undercut(bars);
+            if (v?.prev) Object.assign(row, { pdh: v.prev.h, pdl: v.prev.l });
+          } else if (bars?.length) {
+            // before the open: the latest bars ARE the previous session -> PDH / PDL only
+            row = { pdh: Math.max(...bars.map((x) => x.h)), pdl: Math.min(...bars.map((x) => x.l)) };
+          }
+          if (Object.keys(row).length) next[t] = row;
+        }
         setCalc(next);
       }
       setUpdatedAt(new Date());
@@ -143,11 +154,12 @@ export default function FocusList({ focus, session }) {
   }, [tickerKey]);
   useEffect(() => {
     if (!tickerKey || !live) return undefined;
-    const first = setTimeout(() => refresh(barsLive), 0);
+    const mode = beforeOpen ? 'prev' : 'today';
+    const first = setTimeout(() => refresh(mode), 0);
     if (rate === 'off') return () => clearTimeout(first);
-    const id = setInterval(() => refresh(barsLive), Number(rate) * 1000);
+    const id = setInterval(() => refresh(mode), Number(rate) * 1000);
     return () => { clearTimeout(first); clearInterval(id); };
-  }, [tickerKey, live, barsLive, rate, refresh]);
+  }, [tickerKey, live, beforeOpen, rate, refresh]);
   const preOpen = clock.weekday && clock.mins >= PRICES_FROM && clock.mins < UNDERCUT_FROM;
 
   const byTicker = new Map((focus || []).map((f) => [f.ticker, { ...f, ...(calc[f.ticker] || {}) }]));
@@ -169,7 +181,7 @@ export default function FocusList({ focus, session }) {
                 className={`rounded px-1.5 py-0.5 ${rate === k ? 'bg-emerald-500/15 text-emerald-300' : 'text-neutral-500 hover:text-neutral-300'}`}>{l}</button>
             ))}
           </span>
-          <button type="button" onClick={() => refresh(barsLive || Object.keys(calc).length === 0)} disabled={refreshing || !tickerKey}
+          <button type="button" onClick={() => refresh(beforeOpen ? 'prev' : 'today')} disabled={refreshing || !tickerKey}
             aria-label="Refresh now" title="Refresh now" className="rounded border border-neutral-800 p-1 hover:text-emerald-300 disabled:opacity-40">
             <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
           </button>
@@ -218,6 +230,17 @@ export default function FocusList({ focus, session }) {
                       className="rounded p-0.5 text-neutral-600 hover:text-rose-300"><X className="h-3.5 w-3.5" /></button>
                   </span>
                 </div>
+                {f?.pdh != null && f?.pdl != null && (
+                  <div className="mt-1 flex flex-wrap items-baseline gap-x-3 font-mono text-[11px] tabular-nums">
+                    <span><span className="text-neutral-600">PDH</span> <span className="text-neutral-300">{Number(f.pdh).toFixed(2)}</span></span>
+                    <span><span className="text-neutral-600">PDL</span> <span className="text-neutral-300">{Number(f.pdl).toFixed(2)}</span></span>
+                    {px != null && (
+                      <span className={`font-sans text-[10px] ${px > f.pdh ? 'text-emerald-300' : px < f.pdl ? 'text-rose-300' : 'text-neutral-500'}`}>
+                        {px > f.pdh ? 'above PDH' : px < f.pdl ? 'below PDL' : 'inside yesterday’s range'}
+                      </span>
+                    )}
+                  </div>
+                )}
                 {f && f.status && f.status !== 'no_data' ? (
                   <>
                     <div className="mt-1 grid grid-cols-3 gap-1 font-mono text-[11px] tabular-nums">

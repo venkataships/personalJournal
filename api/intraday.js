@@ -2,7 +2,9 @@
 // api/intraday.js — Vercel serverless function: today's regular-session 15-minute bars from Public.
 //
 //   GET /api/intraday?symbols=MU,OKLO     (up to 9 — the focus list)
-//   -> { MU: [{ t: '2026-11-02T14:30:00.000Z', o, h, l, c, v }, ...oldest→newest], OKLO: [...] }
+//   -> { MU: { bars: [{ t: '2026-11-02T14:30:00.000Z', o, h, l, c, v }, ...oldest→newest],
+//              prev: { day: '2026-10-30', h, l, c } }, OKLO: {...} }
+//   prev = the previous regular session's high / low / close (PDH / PDL), from the same bars.
 //
 // Same Public endpoint the bot uses (bars v2, WEEK / FIFTEEN_MINUTES, regular hours), filtered to the
 // latest New York session. Used by the Sectors focus list to compute "Undercut ✓" in the browser.
@@ -35,7 +37,7 @@ const etMins = (d) => {
   return Number(p.find((x) => x.type === 'hour').value) * 60 + Number(p.find((x) => x.type === 'minute').value);
 };
 
-export function parseToday(js, now = new Date()) {
+export function parseSessions(js, now = new Date()) {
   const out = [];
   for (const b of js?.regularMarket?.bars || []) {
     const d = toDate(b.timestamp);
@@ -49,7 +51,15 @@ export function parseToday(js, now = new Date()) {
   const today = etDay(now);
   const last = out.length ? out[out.length - 1].day : null;
   const day = out.some((b) => b.day === today) ? today : last;   // after hours / weekend: the latest session
-  return out.filter((b) => b.day === day).map((b) => ({ t: b.t, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v }));
+  const bars = out.filter((b) => b.day === day).map((b) => ({ t: b.t, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v }));
+  const prevDay = [...new Set(out.map((b) => b.day))].filter((d) => d < day).pop();
+  const pb = out.filter((b) => b.day === prevDay);
+  const prev = pb.length ? { day: prevDay, h: Math.max(...pb.map((b) => b.h)), l: Math.min(...pb.map((b) => b.l)), c: pb[pb.length - 1].c } : null;
+  return { bars, prev };
+}
+
+export function parseToday(js, now = new Date()) {
+  return parseSessions(js, now).bars;
 }
 
 async function fetchToday(sym, tok) {
@@ -59,7 +69,7 @@ async function fetchToday(sym, tok) {
     if (r.status === 401) _token = null;
     return { error: `Public ${r.status}` };
   }
-  return parseToday(await r.json());
+  return parseSessions(await r.json());
 }
 
 export default async function handler(req, res) {

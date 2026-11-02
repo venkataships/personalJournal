@@ -276,6 +276,7 @@ export default function Guide() {
           <S id="focus" title="Focus list & Undercut ✓">
             <P>Your own 7–9 names (add or remove them at the top of Sectors). Live prices show from 8:00 ET on weekdays (pre-market mid, then last trade, with the change vs yesterday’s close). From 9:30 the page also reads today’s 15-minute bars and works out the Undercut status itself, at the rate you pick (Off · 1 min · 15 s, plus ↻ to refresh now); the bot’s 15-minute pulse does the same as a fallback and sends the alerts. A 15-minute bar only changes as it fills, so faster refresh shows a reclaim sooner but the rule still reads 15-minute bars:</P>
             <Defs items={[
+              ['PDH / PDL', 'The previous regular session’s high and low, with where price sits now: above PDH, below PDL, or inside yesterday’s range. Shown from 8:00 ET.'],
               ['Opening print', 'The first bar’s open (9:30).'],
               ['Morning low', 'The lowest low of the first 30 minutes (two 15-min bars). This is the invalidation.'],
               ['Undercut', 'The morning low is below the opening print — the open got flushed.'],
