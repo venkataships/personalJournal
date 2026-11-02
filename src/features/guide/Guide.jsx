@@ -204,7 +204,7 @@ export default function Guide() {
 
           <S id="other-pages" title="Today, Positions, Intelligence">
             <Defs items={[
-              ['Today', 'The start page (Home, Dashboard and Tomorrow’s Prep in one). Top: portfolio, open trades, check-ins, process score, position caps, and shortcuts. Then today’s alerts, today’s plan (the checklist you generated last night), intention and check-ins, rule of the day. Bottom: “Tonight: prep tomorrow” — generate tomorrow’s checklist from today’s intention, check-ins and life journal; tomorrow it shows as Today’s plan.'],
+              ['Today', 'The start page (Home, Dashboard and Tomorrow’s Prep in one). Top: portfolio, open trades, check-ins, process score, position caps, and shortcuts. Then today’s alerts, today’s plan (the checklist you generated last night), intention, six trading check-ins (prep done · plan before every entry · inside risk limits · only rule-allowed setups · exited by the plan · journaled every trade — answer after the close), rule of the day. Bottom: “Tonight: prep tomorrow” — generate tomorrow’s checklist from today’s intention, check-ins and life journal; tomorrow it shows as Today’s plan. If the AI is unavailable (e.g. no Anthropic credit) it builds a rules checklist instead: each check-in answered “no” becomes tomorrow’s action.'],
               ['Positions', 'Holdings, options positions and cash by account (Taxable, Roth, Joint…), entered by hand.'],
               ['Intelligence', 'On-demand AI analyses (morning brief, sector analysis, watchlist pulse). Note: this page and the Today prep checklist call Claude from the browser with a key that ships to it — moving them behind the server is on the backlog.'],
             ]} />

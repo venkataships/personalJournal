@@ -16,13 +16,23 @@ export function nextDay(d = new Date()) {
   return localDay(t);
 }
 
-export const CHECKIN_LABELS = {
-  trading_ready:       'Trading ready',
-  work_focused:        'Work focused',
-  movement_done:       'Movement done',
-  device_boundaries:   'Device boundaries kept',
-  present_with_akhila: 'Present with Akhila',
-};
+// Trading-only daily check-ins (Nov 2), saved as daily_checkins.trading_checks (migration 016).
+// `action` is what tomorrow's checklist says when the answer was "no".
+export const TRADING_CHECKS = [
+  { id: 'prep_done', label: 'Pre-market prep done', hint: 'market gate, sectors, focus list — before 9:30',
+    action: 'Do the 20-minute top-down before the open: gate, sectors, focus list.' },
+  { id: 'plan_first', label: 'Plan written before every entry', hint: 'stop, size and exit plan before the click',
+    action: 'Write the stop, size and exit plan in the Journal before every entry.' },
+  { id: 'in_limits', label: 'Stayed inside my risk limits', hint: 'risk per trade, position cap, daily stop',
+    action: 'Size every trade with Plan a trade, and stop for the day at the daily loss limit.' },
+  { id: 'setups_only', label: 'Only took setups my rules allow', hint: 'no chasing, no FOMO — flat is fine',
+    action: 'Take only setups your rules allow. If nothing qualifies, stay flat.' },
+  { id: 'exits_by_plan', label: 'Exited by the plan', hint: 'no moved stops, no fear or hope exits',
+    action: 'Let the exit plan decide: no moved stops, no early fear exits.' },
+  { id: 'journaled', label: 'Journaled every trade', hint: 'feeling at entry, exit reason, lesson',
+    action: 'Log each trade the same day: feeling at entry, exit reason, one lesson.' },
+];
+
 
 // ---------------------------------------------------------------------------
 // Data layer
@@ -85,7 +95,7 @@ Return ONLY valid JSON in this exact format, with no surrounding prose, code fen
 Be specific and direct. Reference actual things from their journal. Maximum 3 items per category. No generic advice. If a check-in was missed, address it. If it was met, reinforce it briefly.`;
 
 function buildUserMessage({ intention, checkIns, lifeEntry, rules }) {
-  const checkInLines = Object.entries(CHECKIN_LABELS).map(([key, label]) => {
+  const checkInLines = TRADING_CHECKS.map(({ id: key, label }) => {
     const v = checkIns?.[key];
     const display = v === true ? 'yes' : v === false ? 'no' : 'not answered';
     return `- ${label}: ${display}`;
@@ -110,7 +120,7 @@ Today's life-journal entry:
 
   return `Today's intention: ${intention || '(blank)'}
 
-Today's check-ins:
+Today's trading check-ins:
 ${checkInLines}
 ${lifeBlock}
 
@@ -163,3 +173,17 @@ export async function generatePrep({ intention, checkIns, lifeEntry, rules }) {
   };
 }
 
+
+// No AI available (no credit, no key, network): a checklist from the rules — each "no" becomes tomorrow's action.
+export function rulesPrep({ intention, checkIns }) {
+  const missed = TRADING_CHECKS.filter((c) => checkIns?.[c.id] === false);
+  const answered = TRADING_CHECKS.filter((c) => checkIns?.[c.id] === true || checkIns?.[c.id] === false);
+  const items = missed.slice(1).map((c) => ({ text: c.action, done: false }));   // the first miss is the priority
+  if (!answered.length) items.push({ text: 'Answer the trading check-ins before planning tomorrow.', done: false });
+  const priority = missed[0]?.action
+    || (answered.length ? 'Repeat today’s process: same rules, same size, same review.' : (intention || 'Run the check-ins tonight.'));
+  return {
+    trading_items: items.slice(0, 3), work_items: [], life_items: [], priority,
+    usage: { model: 'rules', prompt_tokens: null, completion_tokens: null },
+  };
+}

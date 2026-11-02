@@ -1,26 +1,22 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Sunrise, Sun, Moon, Check, X, TrendingUp, Briefcase, Activity, Smartphone, Heart, Target, BookOpen,
+  Sunrise, Sun, Moon, Check, X, TrendingUp, Briefcase, Heart, Target, BookOpen, Shield, Crosshair, LogOut,
   ChevronRight, AlertCircle, Wallet, ArrowLeft, ArrowDown, Plus, Radar, Search, Star, Sparkles, Loader2, RefreshCw, ListChecks,
 } from 'lucide-react';
 import { supabase, authReady } from '../../lib/supabase';
 import { usePortfolio, RULE_ANCHORS } from '../../hooks/usePortfolio';
 import { processStats, RULESET } from '../../lib/journal';
 import { TodayAlerts } from '../alerts/Alerts';
-import { localDay, nextDay, fetchLifeJournal, fetchActiveRules, fetchPrep, savePrep, generatePrep } from './prep';
+import { localDay, nextDay, fetchLifeJournal, fetchActiveRules, fetchPrep, savePrep, generatePrep, rulesPrep, TRADING_CHECKS } from './prep';
 
 // One page for the whole day (replaces Home + Dashboard + Tomorrow's Prep):
 //   numbers & process → alerts → today's plan (made last night) → intention & check-ins → rule of the day
 //   → tonight: prep tomorrow (which becomes tomorrow's "Today's plan").
 
-const CHECK_INS = [
-  { id: 'trading_ready', label: 'Trading ready', icon: TrendingUp },
-  { id: 'work_focused', label: 'Work focused', icon: Briefcase },
-  { id: 'movement_done', label: 'Movement done', icon: Activity },
-  { id: 'device_boundaries', label: 'Device boundaries kept', icon: Smartphone },
-  { id: 'present_with_akhila', label: 'Present with Akhila', icon: Heart },
-];
+const CHECK_ICONS = { prep_done: Radar, plan_first: Target, in_limits: Shield, setups_only: Crosshair, exits_by_plan: LogOut, journaled: BookOpen };
+const CHECK_INS = TRADING_CHECKS.map((c) => ({ ...c, icon: CHECK_ICONS[c.id] || Check }));
+const N_CHECKS = CHECK_INS.length;
 const FALLBACK_RULES = [{ rule_number: 1, rule_text: 'Stick to your rules.' }];
 const EVENING_HOUR = 16;
 
@@ -123,7 +119,8 @@ export default function Today() {
         const draft = store.get(`cc.draft.${dateKey}`, null);
         if (row) {
           setIntention(row.intention || '');
-          setCheckIns(Object.fromEntries(CHECK_INS.map((c) => [c.id, row[c.id]])));
+          const saved = row.trading_checks || {};
+          setCheckIns(Object.keys(saved).length ? saved : (draft?.checkIns || {}));
         } else {
           setIntention(draft?.intention || '');
           setCheckIns(draft?.checkIns || {});
@@ -163,7 +160,11 @@ export default function Today() {
     setCheckIns((prev) => {
       const next = prev[id] === value ? null : value;
       (async () => {
-        try { await upsertCheckin(dateKey, { [id]: next }); setError(null); flashSaved(); } catch (err) { setError(err.message || 'Failed to save check-in.'); }
+        try { await upsertCheckin(dateKey, { trading_checks: { ...prev, [id]: next } }); setError(null); flashSaved(); } catch (err) {
+          setError(/trading_checks/.test(err.message || '')
+            ? 'Check-ins need migrations/016_trading_checkins.sql in Supabase — saved on this device until then.'
+            : `${err.message || 'Failed to save check-in.'} Check-ins are kept on this device until the connection returns.`);
+        }
       })();
       return { ...prev, [id]: next };
     });
@@ -189,11 +190,23 @@ export default function Today() {
     try { await savePrep(prepRow(updated)); } catch (e) { setError(e.message || 'Failed to save.'); }
   }, [planToday, planTomorrow]);
 
+  const [genNote, setGenNote] = useState(null);
   const onGenerate = useCallback(async () => {
     setGenerating(true);
     setError(null);
+    setGenNote(null);
     try {
-      const r = await generatePrep({ intention, checkIns, lifeEntry: extra.life, rules });
+      let r;
+      try {
+        r = await generatePrep({ intention, checkIns, lifeEntry: extra.life, rules });
+      } catch (aiErr) {
+        // AI unavailable: fall back to a checklist built from the rules, and say why.
+        const msg = aiErr?.message || '';
+        setGenNote(/credit balance/i.test(msg)
+          ? 'AI is off: the Anthropic account behind the dashboard key is out of credit (Plans & Billing in the Anthropic console). Made a rules checklist from your check-ins instead.'
+          : `AI unavailable (${msg.slice(0, 120) || 'no response'}). Made a rules checklist from your check-ins instead.`);
+        r = rulesPrep({ intention, checkIns });
+      }
       const row = {
         for_date: tomorrow, reflection_summary: intention || '', trading_items: r.trading_items, work_items: r.work_items,
         life_items: r.life_items, priority: r.priority, model: r.usage.model, prompt_tokens: r.usage.prompt_tokens,
@@ -240,7 +253,7 @@ export default function Today() {
           {(error || portfolio.error) && (
             <div className="mt-3 flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-[13px] text-red-300">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.75} />
-              <span className="break-words">{error || portfolio.error}{error ? ' Check-ins are kept locally until the connection returns.' : ''}</span>
+              <span className="break-words">{error || portfolio.error}</span>
             </div>
           )}
         </header>
@@ -254,7 +267,7 @@ export default function Today() {
                 ? <span className={portfolio.realizedPnl > 0 ? 'text-emerald-400' : 'text-red-400'}>{portfolio.realizedPnl > 0 ? '+' : ''}{usd(portfolio.realizedPnl)} realized</span>
                 : 'flat'} />
             <Stat label="Open trades" value={loading ? '—' : extra.openTrades} sub={<Link to="/journal" className="hover:text-emerald-300">Journal →</Link>} />
-            <Stat label="Check-ins" value={loading ? '—' : `${done} / 5`} sub={<a href="#checkins" className="hover:text-emerald-300">below ↓</a>} />
+            <Stat label="Check-ins" value={loading ? '—' : `${done} / ${N_CHECKS}`} sub={<a href="#checkins" className="hover:text-emerald-300">below ↓</a>} />
             <Stat label={`Process · ${RULESET}`} value={!p ? '—' : p.n ? `${p.followed}/${p.n}` : '—'}
               sub={!p ? '' : p.n ? `by plan · ${p.streak} in a row` : 'no reviewed trades yet'} />
           </div>
@@ -295,15 +308,18 @@ export default function Today() {
 
         {/* Check-ins */}
         <section id="checkins" className="mb-8 scroll-mt-16">
-          <Label icon={Check} text="Daily check-ins" hint={`${done} of 5`} />
+          <Label icon={Check} text="Trading check-ins" hint={`${done} of ${N_CHECKS} · answer after the close; no trades today = skip the trade ones`} />
           <ul className="mt-3 divide-y divide-neutral-900 rounded-md border border-neutral-800 bg-neutral-950/40">
-            {CHECK_INS.map(({ id, label, icon }) => {
+            {CHECK_INS.map(({ id, label, hint, icon }) => {
               const s = checkIns[id];
               const Icon = icon;
               return (
                 <li key={id} className="flex items-center gap-3 px-4 py-3">
                   <Icon className={`h-4 w-4 shrink-0 ${s === true ? 'text-emerald-400' : s === false ? 'text-red-400' : 'text-neutral-500'}`} strokeWidth={1.75} />
-                  <span className={`flex-1 text-[15px] ${s === true ? 'text-neutral-100' : s === false ? 'text-neutral-400' : 'text-neutral-300'}`}>{label}</span>
+                  <span className="flex-1">
+                    <span className={`block text-[15px] ${s === true ? 'text-neutral-100' : s === false ? 'text-neutral-400' : 'text-neutral-300'}`}>{label}</span>
+                    <span className="block text-[11px] text-neutral-600">{hint}</span>
+                  </span>
                   <Toggle active={s === true} tone="pos" onClick={() => setCheckIn(id, true)} label={`${label}: yes`} disabled={loading}><Check className="h-4 w-4" strokeWidth={2.25} /></Toggle>
                   <Toggle active={s === false} tone="neg" onClick={() => setCheckIn(id, false)} label={`${label}: no`} disabled={loading}><X className="h-4 w-4" strokeWidth={2.25} /></Toggle>
                 </li>
@@ -351,6 +367,7 @@ export default function Today() {
               : planTomorrow ? <><RefreshCw className="h-4 w-4" /> Regenerate</> : <><Sparkles className="h-4 w-4" /> Generate tomorrow’s checklist</>}
           </button>
           {!intention.trim() && !loading && <p className="mt-2 text-[12px] text-neutral-500">Write today’s intention above first.</p>}
+          {genNote && <p className="mt-2 rounded border border-amber-500/40 bg-amber-500/5 px-2.5 py-1.5 text-[12px] text-amber-200">{genNote}</p>}
           {planTomorrow && <div className="mt-5"><Plan plan={planTomorrow} onToggle={(c, i) => toggle('tomorrow', c, i)} /></div>}
         </section>
 
