@@ -8,6 +8,18 @@ import HelpLink from '../../components/HelpLink';
 // The list lives in Supabase focus_picks; each pulse writes every name's state into market_pulse.focus.
 
 const MAX = 9;
+const PRICES_FROM = 8 * 60;        // live quotes from 8:00 ET on weekdays (pre-market mid, then last trade)
+const PRICES_UNTIL = 20 * 60;
+const UNDERCUT_FROM = 9 * 60 + 30;
+
+// Weekday and minutes since midnight in New York.
+function etClock(d = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(d);
+  const get = (t) => parts.find((x) => x.type === t)?.value;
+  return { weekday: !['Sat', 'Sun'].includes(get('weekday')), mins: Number(get('hour')) * 60 + Number(get('minute')) };
+}
+const pctText = (v) => (v == null ? '' : `${v > 0 ? '+' : ''}${Number(v).toFixed(2)}%`);
+const pctTone = (v) => (v == null ? 'text-neutral-500' : v > 0 ? 'text-emerald-400' : v < 0 ? 'text-rose-400' : 'text-neutral-400');
 const STATUS = {
   undercut_ok: { label: 'Undercut ✓', cls: 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300' },
   watching: { label: 'Watching', cls: 'border-sky-500/40 bg-sky-500/10 text-sky-300' },
@@ -34,6 +46,8 @@ export default function FocusList({ focus, session }) {
   const [picks, setPicks] = useState({ loaded: false, rows: [], error: null });
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  const [clock, setClock] = useState(() => etClock());
+  const [quotes, setQuotes] = useState({});
 
   const load = useCallback(async () => {
     try {
@@ -83,6 +97,30 @@ export default function FocusList({ focus, session }) {
     }
   };
 
+  // Live quotes for the focus names, every minute from 8:00 to 20:00 ET on weekdays.
+  const tickerKey = picks.rows.map((r) => r.ticker).sort().join(',');
+  const live = clock.weekday && clock.mins >= PRICES_FROM && clock.mins < PRICES_UNTIL;
+  useEffect(() => {
+    const id = setInterval(() => setClock(etClock()), 60000);
+    return () => clearInterval(id);
+  }, []);
+  useEffect(() => {
+    if (!tickerKey || !live) return undefined;
+    let off = false;
+    const load = async () => {
+      try {
+        const r = await fetch(`/api/quotes?symbols=${tickerKey}`);
+        if (!r.ok) return;
+        const js = await r.json();
+        if (!off) setQuotes(js || {});
+      } catch { /* optional */ }
+    };
+    load();
+    const id = setInterval(load, 60000);
+    return () => { off = true; clearInterval(id); };
+  }, [tickerKey, live]);
+  const preOpen = clock.weekday && clock.mins >= PRICES_FROM && clock.mins < UNDERCUT_FROM;
+
   const byTicker = new Map((focus || []).map((f) => [f.ticker, f]));
   const full = picks.rows.length >= MAX;
 
@@ -119,12 +157,17 @@ export default function FocusList({ focus, session }) {
           {picks.rows.map((p) => {
             const f = byTicker.get(p.ticker);
             const st = f?.status ? STATUS[f.status] || STATUS.no_data : null;
+            const q = quotes[p.ticker];
+            const px = q?.price ?? f?.price;
+            const sessTag = q?.session === 'premarket' ? 'pre' : q?.session === 'afterhours' ? 'after hrs' : null;
             return (
               <div key={p.id} className={`bg-[#0b0b0b] px-3 py-2.5 ${f?.status === 'undercut_ok' ? 'ring-1 ring-inset ring-emerald-500/30' : ''}`}>
                 <div className="flex items-center justify-between gap-2">
                   <span className="flex items-baseline gap-2">
                     <Link to={`/lookup/${p.ticker}`} className="font-mono text-[14px] font-semibold text-neutral-100 hover:text-emerald-300">{p.ticker}</Link>
-                    {f?.price != null && <span className="font-mono text-[12px] tabular-nums text-neutral-300">{f.price.toFixed(2)}</span>}
+                    {px != null && <span className="font-mono text-[12px] tabular-nums text-neutral-300">{Number(px).toFixed(2)}</span>}
+                    {q?.changePct != null && <span className={`font-mono text-[11px] tabular-nums ${pctTone(q.changePct)}`}>{pctText(q.changePct)}</span>}
+                    {sessTag && <span className="text-[10px] uppercase tracking-wider text-neutral-600">{sessTag}</span>}
                   </span>
                   <span className="flex items-center gap-1.5">
                     {st && <span className={`rounded border px-1.5 py-0.5 text-[10px] ${st.cls}`}>{st.label}</span>}
@@ -146,7 +189,9 @@ export default function FocusList({ focus, session }) {
                   </>
                 ) : (
                   <div className="mt-1 text-[11px] text-neutral-600">
-                    {(session === 'regular' || session === 'afterhours') && f?.status ? explain(f) : 'Tracked from 9:30 ET on market days.'}
+                    {(session === 'regular' || session === 'afterhours') && f?.status ? explain(f)
+                      : preOpen ? 'Pre-market price, vs yesterday’s close. Undercut tracking starts at 9:30 ET.'
+                        : 'Prices from 8:00 ET on weekdays; Undercut tracking from 9:30.'}
                   </div>
                 )}
               </div>

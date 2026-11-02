@@ -274,7 +274,7 @@ export default function Guide() {
           </S>
 
           <S id="focus" title="Focus list & Undercut ✓">
-            <P>Your own 7–9 names (add or remove them at the top of Sectors). Every 15-minute pulse reads today’s 15-minute bars for each one:</P>
+            <P>Your own 7–9 names (add or remove them at the top of Sectors). Live prices show from 8:00 ET on weekdays (pre-market mid, then last trade, refreshed every minute, with the change vs yesterday’s close). From 9:30, every 15-minute pulse reads today’s 15-minute bars for each one:</P>
             <Defs items={[
               ['Opening print', 'The first bar’s open (9:30).'],
               ['Morning low', 'The lowest low of the first 30 minutes (two 15-min bars). This is the invalidation.'],
