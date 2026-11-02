@@ -87,7 +87,7 @@ export default function Guide() {
               ['Pre-market', <><L to="/trading">Today</L>: set the intention, run check-ins, read last night’s plan. Then Sectors: the market gate and the AI brief (one line each, minimized by default). Check catalysts. Look up any gapper in <L to="/lookup">Lookup</L> — it shows the live pre-market price.</>],
               ['9:30–10:00', <>Don’t act on the first push. Breakouts on Top Setups show as “Break only” until they pull back; ~ means provisional until the close. Options spreads are widest now.</>],
               ['~10:00–11:00', <>The 15-min retest check has data. Pick from Top Setups with a <B>held retest</B>, open the ticker in Lookup, size it in <A to="plan">Plan a trade</A>, then <B>Log trade</B>.</>],
-              ['Midday', <>AI notes flag big moves on your open trades and groups. Check at set times (say 10:30, 1:00, 3:30) — the system doesn’t need watching.</>],
+              ['Midday', <>Event notes arrive in an hourly batch and the midday brief lands after 12:00. Check at set times (say 10:30, 12:15, 3:30) — the system doesn’t need watching.</>],
               ['Close', <>Journal: each open trade shows its exit plan and whether a rule is triggered (trim zone, time stop). Close what the plan says to close — pick <B>why</B> you exited — and review.</>],
               ['Evening', <><L to="/trading">Today</L> → Tonight: prep tomorrow. Generate the checklist; it becomes tomorrow’s plan.</>],
               ['Weekend', <>Process score and streak first, then the Edge panel and the Top Setups track record. Study traders’ rules → <L to="/playbook">Playbook</L>, but rule changes wait for the monthly review.</>],
@@ -153,7 +153,7 @@ export default function Guide() {
             <Defs items={[
               ['Numbers vs words', 'Every number comes from the rules. The model only explains them; it is told not to invent prices or news and not to give buy/sell calls. It can state what your rules imply (stop, invalid-below, 8/21, gate).'],
               ['Context it gets', 'Breadth, index moves, sector medians, your open trades and plan status (vs stop and 21 EMA), deterioration, catalysts, and your approved Playbook principles — cited as [Playbook: name].'],
-              ['Limits', '$0.50/day budget; up to 4 notes per run and 20 per day, open trades first. After a billing/auth error it pauses 60 min; a new API key clears the pause. When off, notes fall back to the rules’ plain text (tagged “rules”).'],
+              ['Limits', 'Since Nov 2: three briefs a day (morning from 8:30, midday from 12:00, wrap after the close) and event notes once an hour — every event is still detected and fed to the next brief, but only the top 4 of each hour (open trades first) get a note. $0.50/day budget. After a billing/auth error it pauses 60 min; a new API key clears the pause. When off, notes fall back to the rules’ plain text (tagged “rules”).'],
               ['What it can’t do', 'Knows only our numbers — no headlines. A news-driven move gets “no cause in the data”.'],
             ]} />
           </S>
