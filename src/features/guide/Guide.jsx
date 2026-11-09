@@ -133,17 +133,27 @@ export default function Guide() {
             <Note>With the current limits the position cap (lower of $5,000 or 5% of the account) usually sets share size — actual risk is often well under the risk % you type. Options aren’t capped that way, so the risk % decides their size.</Note>
           </S>
 
-          <S id="alerts" title="Alerts">
-            <Page answers="Did anything just happen that my rules say I should act on?"
-              data="alerts.py, after each regular-hours pulse. Rules only, no AI. Shown at the top of Sectors (today, refreshed every minute) and on Notes & alerts (any day)." />
+          <S id="alerts" title="Action board & alerts">
+            <Page answers="What do my levels say I should do right now?"
+              data="watcher.py: one batched quote call every 60 seconds in regular hours, for your focus list, today’s Top 5 setups, your open journal trades and SPY. Rules only, no AI. alerts.py still posts Setup ready / Retest lost / Trail / Time stop from the 15-minute pulse." />
+            <P><B>Changed Nov 9.</B> The old alerts read 15-minute bars from a 15-minute job, so each one arrived 23–40 minutes after the move, and “Undercut ✓” fired on dips of 0.06% and on trend days where price never crossed anything. Level triggers now fire on an actual cross, one to two minutes after it, and each one is a plan.</P>
             <Defs items={[
-              ['Setup ready', 'A Top 5 pick now meets the system trader’s entry rule: retest held (15-min not shaky/lost), gate not red, deterioration under 3, valid stop below price. From 10:00 ET. Shows price, stop, gate, det, cautions, and a Plan-a-trade link.'],
-              ['Retest lost', 'A name alerted today whose retest stopped holding — the entry rule no longer qualifies it.'],
-              ['Stop', 'An open stock trade in your journal at or through its stop.'],
-              ['Trim', 'At your exit plan’s trim level (e.g. 2R).'],
-              ['Trail / Time stop', 'From 15:30 ET only, because both act on the close: trading under your plan’s trail EMA, or at the time stop and not +1R.'],
-              ['Rules of the alerts', 'Each fires at most once a day per name or trade. Options trades are skipped (their stop is a premium). They state what your rules say; whether to act is your call.'],
-              ['Telegram', 'Off. To turn it back on, add PULSE_ALERTS_TELEGRAM=1 to the server .env and restart. PULSE_ALERTS=0 stops alerts entirely.'],
+              ['Reclaim the open', 'Price flushed under the opening print by at least max(0.4%, ¼ of the stock’s ATR), then came back above it. Stop = the flush low.'],
+              ['Reclaim yesterday’s low', 'Price undercut the previous day’s low by at least 0.2%, then came back above it. Stop = the flush low.'],
+              ['Range break', 'After 10:00, price breaks the high of the first 30 minutes from below. Stop = the widest of range low / VWAP / open that still fits the risk cap.'],
+              ['What counts as a cross', 'Two consecutive one-minute ticks beyond the level by 0.05%. If price falls back first, the count restarts.'],
+              ['The plan', 'Buy zone = trigger price up to +0.5R (above that it is “extended: don’t chase”) · stop · risk % · size from your position cap ($5k or 5%) and the dollars at risk · 1R and 2R.'],
+              ['Quality gate', 'No trigger unless: risk is between 0.3% and min(4%, 1 ATR) · market gate not red · 9:45–15:30 ET (range break from 10:00). Not posted if you already hold the ticker, you are past the $1,500 daily loss stop, or the ticker already had 2 alerts today.'],
+              ['Grade', 'Six yes/no checks: gate green · a leader (Leading/Improving or a Top 5 setup) · above VWAP · SPY above its open · tight stop (≤2% or ≤0.6 ATR) · real flush (≥ max(1%, ½ ATR); 0.5% for yesterday’s low) or, for a range break, volume pace ≥1.2x. A = 5–6, B = 3–4, C = 0–2. A and B post as alerts; C shows on the board only.'],
+              ['Act now', 'A trigger from the last 30 minutes whose price is still between the level and the don’t-chase line. Turn Sound on for a beep and a browser notification when one appears.'],
+              ['Close to trigger', 'An armed level within 0.5%: the price it needs, and what the stop would be.'],
+              ['Manage', 'Your open stock trades every minute: R now, distance to the stop, trim level. Alerts: Near stop (¾ of the way to it), Stop, Trim.'],
+              ['Earlier today', 'Triggers that are extended, back under the level, failed (lost the stop), at 2R, or older than 30 minutes.'],
+              ['Scorecard', 'Every trigger, posted or not, is followed to the close: did it reach 1R before the stop, was it stopped first, R at the close. By trigger type and grade, last 30 days. This is the only evidence these alerts are worth acting on; under about 30 per row it is noise.'],
+              ['Setup ready / Retest lost', 'Unchanged, from the 15-minute pulse: a Top 5 pick meets the system trader’s entry rule (retest held, gate not red, deterioration under 3). Now also shows the don’t-chase line, 1R, 2R and size.'],
+              ['Trail / Time stop', 'From 15:30 ET only, because both act on the close.'],
+              ['Limits', 'Quotes are polled once a minute, so a spike and reversal inside one minute can be missed, and the trigger price can be a few cents past the level. VWAP comes from 15-minute bars (approximate). Long side only. The dashboard only helps if the tab is open: for a push to your phone set PULSE_ALERTS_TELEGRAM=A (grade A and stops only) or =1 (everything) in the server .env.'],
+              ['Switches', 'WATCHER=0 turns the watcher off and brings the old Undercut ✓ alert back. PULSE_ALERTS=0 stops all alerts.'],
             ]} />
           </S>
 
@@ -274,6 +284,7 @@ export default function Guide() {
           </S>
 
           <S id="focus" title="Focus list & Undercut ✓">
+            <P><B>Nov 9:</B> during market hours each card now shows the level watcher’s state (Armed · Triggered · Failed · Under the open · In the range · No trigger), the same one the Action board and the alerts use; see <A to="alerts">Action board & alerts</A>. The Undercut rule below is the fallback when the watcher is off, and it now needs a flush of at least 0.4% and a real cross (the reclaim bar opened, or the bar before it closed, at or under the level).</P>
             <P>Your own 7–9 names (add or remove them at the top of Sectors). Live prices show from 8:00 ET on weekdays (pre-market mid, then last trade, with the change vs yesterday’s close). From 9:30 the page also reads today’s 15-minute bars and works out the Undercut status itself, at the rate you pick (Off · 1 min · 15 s, plus ↻ to refresh now); the bot’s 15-minute pulse does the same as a fallback and sends the alerts. A 15-minute bar only changes as it fills, so faster refresh shows a reclaim sooner but the rule still reads 15-minute bars:</P>
             <Defs items={[
               ['PDH / PDL', 'The previous regular session’s high and low, with where price sits now: above PDH, below PDL, or inside yesterday’s range. Shown from 8:00 ET.'],
@@ -428,7 +439,7 @@ export default function Guide() {
           </S>
 
           <S id="freeze" title="Rules v1 & the monthly review">
-            <P>Rules v1 took effect Oct 11, 2026. Every trade is tagged with its ruleset, and the Edge panel only counts trades under the current one. Thresholds, scores, presets and limits change only at the monthly review (next: Nov 8) — never mid-month and never because of a recent loss. <B>Amendment, Oct 28</B> (your call, made knowingly mid-month): sector points now include the parent sector’s rank, and VIX elevated and rising turns a green gate to caution. <B>Oct 31</B>: that rank became 5-day + ¼ of 20-day, and only Leading/Improving sectors can be top — so v1 stats before and after Oct 28 mix two scoring versions; read the Nov 8 review with that in mind. At the review: look at the process score, the Edge panel and the track record; change at most one or two things; bump the version.</P>
+            <P>Rules v1 took effect Oct 11, 2026. Every trade is tagged with its ruleset, and the Edge panel only counts trades under the current one. Thresholds, scores, presets and limits change only at the monthly review (next: Nov 8) — never mid-month and never because of a recent loss. <B>Amendment, Oct 28</B> (your call, made knowingly mid-month): sector points now include the parent sector’s rank, and VIX elevated and rising turns a green gate to caution. <B>Oct 31</B>: that rank became 5-day + ¼ of 20-day, and only Leading/Improving sectors can be top — so v1 stats before and after Oct 28 mix two scoring versions; read the Nov 8 review with that in mind. <B>Nov 9</B>: Undercut ✓ alerts were replaced by the 60-second level triggers (reclaim the open, reclaim yesterday’s low, range break) with a quality gate and a grade; these are alerts and a study, they do not change the Top Setups score or the system trader. The Nov 8 review has not been held yet. At the review: look at the process score, the Edge panel and the track record; change at most one or two things; bump the version.</P>
           </S>
 
           <S id="limits-of" title="What it can’t tell you">

@@ -16,6 +16,10 @@ const ALERT_TYPES = {
   trim: { label: 'Trim', cls: 'border-sky-500/40 bg-sky-500/10 text-sky-300' },
   trail: { label: 'Trail', cls: 'border-amber-500/40 bg-amber-500/10 text-amber-300' },
   time: { label: 'Time stop', cls: 'border-amber-500/40 bg-amber-500/10 text-amber-300' },
+  reclaim: { label: 'Reclaim', cls: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' },
+  orh: { label: 'Range break', cls: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' },
+  near: { label: 'Near stop', cls: 'border-amber-500/40 bg-amber-500/10 text-amber-300' },
+  dailystop: { label: 'Daily stop', cls: 'border-rose-500/50 bg-rose-500/10 text-rose-300' },
   undercut: { label: 'Undercut ✓', cls: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' },
   undercut_fail: { label: 'Lost the low', cls: 'border-rose-500/40 bg-rose-500/10 text-rose-300' },
 };
@@ -48,9 +52,9 @@ export function AlertRow({ a }) {
 }
 
 // Today's alerts, newest first, refreshed every minute. Used at the top of the Sectors page.
-export function TodayAlerts() {
+export function TodayAlerts({ defaultOpen = true }) {
   const [st, setSt] = useState({ rows: [], loaded: false, missing: false });
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(defaultOpen);
 
   useEffect(() => {
     let off = false;
@@ -78,7 +82,7 @@ export function TodayAlerts() {
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
         className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left">
         <span className="flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-neutral-400">
-          <Bell className="h-3.5 w-3.5 text-emerald-400" strokeWidth={1.75} /> Alerts today
+          <Bell className="h-3.5 w-3.5 text-emerald-400" strokeWidth={1.75} /> Alert log
           <span className="font-mono normal-case tracking-normal text-neutral-500">{st.loaded ? n : '…'}</span>
           {urgent > 0 && <span className="rounded border border-rose-500/50 bg-rose-500/10 px-1.5 text-[10px] normal-case tracking-normal text-rose-300">{urgent} stop{urgent > 1 ? 's' : ''}</span>}
           <HelpLink to="alerts" />
@@ -89,7 +93,7 @@ export function TodayAlerts() {
         <div className="border-t border-neutral-900">
           {n === 0 ? (
             <div className="px-3 py-2.5 text-[12px] text-neutral-600">
-              {st.loaded ? 'None yet. Setup alerts start at 10:00 ET; trade alerts fire when a stop, trim level, trail or time stop is hit.' : 'Loading…'}
+              {st.loaded ? 'None yet. Level triggers post from 9:45 ET, setup alerts from 10:00; trade alerts fire at a stop, near a stop, or at a trim level.' : 'Loading…'}
             </div>
           ) : (
             <div className="max-h-72 overflow-y-auto">{st.rows.map((a) => <AlertRow key={a.id} a={a} />)}</div>

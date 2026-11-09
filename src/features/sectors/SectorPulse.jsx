@@ -5,6 +5,8 @@ import { TodayAlerts } from '../alerts/Alerts';
 import TopDown from './TopDown';
 import WatchlistRanking from './WatchlistRanking';
 import FocusList from './FocusList';
+import ActionBoard from './ActionBoard';
+import useLiveWatch from './useLiveWatch';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft, AlertCircle, RefreshCw, TrendingUp, TrendingDown, Radar,
@@ -85,6 +87,7 @@ function parseTickers(text) {
 
 export default function SectorPulse() {
   const [state, setState] = useState({ loading: true, error: null, row: null });
+  const watch = useLiveWatch();
   const [editing, setEditing] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [savedNote, setSavedNote] = useState(false);
@@ -270,11 +273,14 @@ export default function SectorPulse() {
         {/* Live market bar — same component and tickers as the Watchlist page */}
         <MarketBar />
 
-        {/* Alerts on your rules (bot: alerts.py) */}
-        <TodayAlerts />
+        {/* What to do now: the 60-second level watcher's states (bot: watcher.py) */}
+        <ActionBoard watch={watch} />
 
-        {/* Your focus list (up to 9) with the Undercut ✓ tag */}
-        <FocusList focus={row?.focus} session={row?.session} />
+        {/* Your focus list (up to 9); cards read the same watcher state as the board */}
+        <FocusList focus={row?.focus} session={row?.session} watch={watch.board} />
+
+        {/* The alert log (bot: alerts.py + watcher.py) */}
+        <TodayAlerts defaultOpen={false} />
 
         {/* AI brief + today's notes (hidden until the bot has written one) */}
         <AiNotes brief={state.brief} events={state.notes} session={row?.session} />

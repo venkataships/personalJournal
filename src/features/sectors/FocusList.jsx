@@ -48,7 +48,19 @@ function explain(f) {
   }
 }
 
-export default function FocusList({ focus, session }) {
+// States from the bot's 60-second level watcher (watcher.py). When the watcher is live the card shows these,
+// so the card, the Action board and the alerts all say the same thing.
+const WSTATE = {
+  triggered: { label: 'Triggered', cls: 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300' },
+  armed: { label: 'Armed', cls: 'border-sky-500/40 bg-sky-500/10 text-sky-300' },
+  failed: { label: 'Failed', cls: 'border-rose-500/50 bg-rose-500/10 text-rose-300' },
+  below_open: { label: 'Under the open', cls: 'border-neutral-700 bg-neutral-800/40 text-neutral-300' },
+  in_range: { label: 'In the range', cls: 'border-neutral-700 bg-neutral-800/40 text-neutral-300' },
+  above: { label: 'No trigger', cls: 'border-neutral-700 bg-neutral-800/40 text-neutral-300' },
+  no_data: { label: 'No data', cls: 'border-neutral-800 text-neutral-500' },
+};
+
+export default function FocusList({ focus, session, watch }) {
   const [picks, setPicks] = useState({ loaded: false, rows: [], error: null });
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -211,12 +223,13 @@ export default function FocusList({ focus, session }) {
         <div className="grid gap-px border-t border-neutral-900 bg-neutral-900 sm:grid-cols-2 lg:grid-cols-3">
           {picks.rows.map((p) => {
             const f = byTicker.get(p.ticker);
-            const st = f?.status ? STATUS[f.status] || STATUS.no_data : null;
+            const wr = watch && !watch.closed ? (watch.rows || []).find((r) => r.ticker === p.ticker && r.state) : null;
+            const st = wr ? WSTATE[wr.state] || WSTATE.no_data : f?.status ? STATUS[f.status] || STATUS.no_data : null;
             const q = quotes[p.ticker];
             const px = q?.price ?? f?.price;
             const sessTag = q?.session === 'premarket' ? 'pre' : q?.session === 'afterhours' ? 'after hrs' : null;
             return (
-              <div key={p.id} className={`bg-[#0b0b0b] px-3 py-2.5 ${f?.status === 'undercut_ok' ? 'ring-1 ring-inset ring-emerald-500/30' : ''}`}>
+              <div key={p.id} className={`bg-[#0b0b0b] px-3 py-2.5 ${(wr ? wr.state === 'triggered' : f?.status === 'undercut_ok') ? 'ring-1 ring-inset ring-emerald-500/30' : ''}`}>
                 <div className="flex items-center justify-between gap-2">
                   <span className="flex items-baseline gap-2">
                     <Link to={`/lookup/${p.ticker}`} className="font-mono text-[14px] font-semibold text-neutral-100 hover:text-emerald-300">{p.ticker}</Link>
@@ -241,7 +254,16 @@ export default function FocusList({ focus, session }) {
                     )}
                   </div>
                 )}
-                {f && f.status && f.status !== 'no_data' ? (
+                {wr ? (
+                  <>
+                    <div className="mt-1 grid grid-cols-3 gap-1 font-mono text-[11px] tabular-nums">
+                      <span><span className="text-neutral-600">open</span> <span className="text-neutral-300">{wr.open ?? '—'}</span></span>
+                      <span><span className="text-neutral-600">low</span> <span className="text-rose-300">{wr.lo ?? '—'}</span></span>
+                      <span><span className="text-neutral-600">vwap</span> <span className="text-neutral-300">{wr.vwap ?? '—'}</span></span>
+                    </div>
+                    <div className="mt-1 text-[11px] leading-snug text-neutral-400">{wr.text}</div>
+                  </>
+                ) : f && f.status && f.status !== 'no_data' ? (
                   <>
                     <div className="mt-1 grid grid-cols-3 gap-1 font-mono text-[11px] tabular-nums">
                       <span><span className="text-neutral-600">open</span> <span className="text-neutral-300">{f.open}</span></span>
