@@ -39,7 +39,8 @@ const num = (v, d = 2) => (v == null ? '—' : Number(v).toFixed(d));
 const rText = (v) => (v == null ? '—' : `${v > 0 ? '+' : ''}${Number(v).toFixed(2)}R`);
 const what = (t) => `${VERB[t.kind] || 'Crossed'} ${LEVEL[t.level_name] || t.level_name} ${num(t.level)}`;
 const SideChip = ({ t }) => (
-  <span className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${isShort(t) ? 'border-rose-500/50 bg-rose-500/10 text-rose-200' : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'}`}>{isShort(t) ? 'SHORT' : 'LONG'}</span>
+  <span title={isShort(t) ? 'Short triggers are a test: no track record yet' : undefined}
+    className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${isShort(t) ? 'border-rose-500/50 bg-rose-500/10 text-rose-200' : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'}`}>{isShort(t) ? 'SHORT · TEST' : 'LONG'}</span>
 );
 
 function readSound() {
@@ -92,6 +93,7 @@ function ActCard({ ticker, price, t }) {
           <span className="text-neutral-500">for the same ${num(t.risk_usd, 0)} at risk</span>
         </div>
       )}
+      {short && <div className="mt-1 text-[11px] text-amber-300/80">Test: short triggers have no track record yet. A put bought from this card is not tracked in Manage.</div>}
       {short && (
         <div className="mt-1 text-[12px] text-neutral-300">
           <span className="text-[10px] uppercase tracking-wider text-neutral-500">Put instead</span>{' '}
@@ -247,7 +249,7 @@ export default function ActionBoard({ watch }) {
         </button>
       </div>
       {stale && <div className="border-t border-amber-500/30 bg-amber-500/5 px-3 py-1.5 text-[12px] text-amber-200">The watcher last updated {Math.round(ageMin)} min ago. Treat everything below as old until it catches up.</div>}
-      {board.locked && <div className="border-t border-rose-500/30 bg-rose-500/5 px-3 py-1.5 text-[12px] text-rose-200">Daily loss stop reached. Entry alerts are paused for today.</div>}
+      {board.locked && <div className="border-t border-rose-500/30 bg-rose-500/5 px-3 py-1.5 text-[12px] text-rose-200">Daily loss stop reached. No entry alerts post for the rest of today, long or short.</div>}
       {board.gate === 'red' && <div className="border-t border-rose-500/30 bg-rose-500/5 px-3 py-1.5 text-[12px] text-rose-200">Market gate is red: no long triggers today. Short triggers on your focus list and open trades are still watched.</div>}
 
       <div className="border-t border-neutral-900">
