@@ -18,6 +18,8 @@ const ALERT_TYPES = {
   time: { label: 'Time stop', cls: 'border-amber-500/40 bg-amber-500/10 text-amber-300' },
   reclaim: { label: 'Reclaim', cls: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' },
   orh: { label: 'Range break', cls: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' },
+  reject: { label: 'Short', cls: 'border-rose-500/40 bg-rose-500/10 text-rose-300' },
+  orl: { label: 'Short: range', cls: 'border-rose-500/40 bg-rose-500/10 text-rose-300' },
   near: { label: 'Near stop', cls: 'border-amber-500/40 bg-amber-500/10 text-amber-300' },
   dailystop: { label: 'Daily stop', cls: 'border-rose-500/50 bg-rose-500/10 text-rose-300' },
   undercut: { label: 'Undercut ✓', cls: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' },

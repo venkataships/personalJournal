@@ -6,23 +6,25 @@ import { etTime } from '../../lib/notes';
 import HelpLink from '../../components/HelpLink';
 
 // The Action board: what the 60-second level watcher says to do NOW, as states rather than a log.
-//   Act now          a level trigger fired in the last 30 min and price is still in the buy zone
+//   Act now          a level trigger (long or short) fired in the last 30 min and price is still in the zone
 //   Close to trigger an armed level within 0.5%: what has to happen next
 //   Manage           your open trades: R now, distance to stop, trim level
 //   Earlier today    triggers that are extended, failed, at target or stale
 // Rules only. It never places orders.
 
 const SOUND_KEY = 'board.sound';
-const LEVEL = { open: 'the open', pdl: 'yesterday’s low', orh: 'the opening-range high' };
+const LEVEL = { open: 'the open', pdl: 'yesterday’s low', orh: 'the opening-range high', pdh: 'yesterday’s high', orl: 'the opening-range low' };
+const VERB = { reclaim: 'Reclaimed', orh: 'Broke', reject: 'Lost', orl: 'Broke' };
+const isShort = (t) => t.side === 'short';
 const GRADE = {
   A: 'border-emerald-500/60 bg-emerald-500/15 text-emerald-200',
   B: 'border-sky-500/50 bg-sky-500/10 text-sky-200',
   C: 'border-neutral-700 bg-neutral-800/40 text-neutral-400',
 };
 const STATUS = {
-  in_zone: { label: 'In the buy zone', cls: 'text-emerald-300' },
+  in_zone: { label: 'In the zone', cls: 'text-emerald-300' },
   extended: { label: 'Extended: don’t chase', cls: 'text-amber-300' },
-  below_level: { label: 'Back under the level', cls: 'text-amber-300' },
+  wrong_side: { label: 'Back through the level', cls: 'text-amber-300' },
   failed: { label: 'Failed: lost the stop', cls: 'text-rose-300' },
   target: { label: '2R reached', cls: 'text-emerald-300' },
   stale: { label: 'Triggered earlier', cls: 'text-neutral-400' },
@@ -35,7 +37,10 @@ const TRADE = {
 };
 const num = (v, d = 2) => (v == null ? '—' : Number(v).toFixed(d));
 const rText = (v) => (v == null ? '—' : `${v > 0 ? '+' : ''}${Number(v).toFixed(2)}R`);
-const what = (t) => (t.kind === 'reclaim' ? `Reclaimed ${LEVEL[t.level_name]} ${num(t.level)}` : `Broke ${LEVEL.orh} ${num(t.level)}`);
+const what = (t) => `${VERB[t.kind] || 'Crossed'} ${LEVEL[t.level_name] || t.level_name} ${num(t.level)}`;
+const SideChip = ({ t }) => (
+  <span className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${isShort(t) ? 'border-rose-500/50 bg-rose-500/10 text-rose-200' : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'}`}>{isShort(t) ? 'SHORT' : 'LONG'}</span>
+);
 
 function readSound() {
   try { return window.localStorage.getItem(SOUND_KEY) === '1'; } catch { return false; }
@@ -60,21 +65,44 @@ function Label({ children }) {
 }
 
 function ActCard({ ticker, price, t }) {
+  const short = isShort(t);
+  const [zLo, zHi] = [t.entry, t.chase].sort((x, y) => x - y);
+  const swing = t.swing_stop != null && t.swing_stop !== t.stop;
   return (
-    <div className="border-t border-emerald-500/20 bg-emerald-500/[0.04] px-3 py-2.5">
+    <div className={`border-t px-3 py-2.5 ${short ? 'border-rose-500/20 bg-rose-500/[0.04]' : 'border-emerald-500/20 bg-emerald-500/[0.04]'}`}>
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
         <Link to={`/lookup/${ticker}`} className="font-mono text-[15px] font-semibold text-neutral-50 hover:text-emerald-300">{ticker}</Link>
+        <SideChip t={t} />
         <span className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${GRADE[t.grade] || GRADE.C}`}>Grade {t.grade}</span>
         <span className="text-[13px] text-neutral-200">{what(t)} at {t.at}</span>
         <span className="font-mono text-[12px] tabular-nums text-neutral-400">now {num(price)} ({rText(t.r_now)})</span>
         <Link to={`/lookup/${ticker}`} className="ml-auto text-[11px] text-emerald-300 hover:underline">Plan it →</Link>
       </div>
       <div className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-[12px] tabular-nums sm:grid-cols-4">
-        <span><span className="font-sans text-[10px] uppercase tracking-wider text-neutral-500">Buy zone</span><br /><span className="text-emerald-200">{num(t.entry)}–{num(t.chase)}</span></span>
-        <span><span className="font-sans text-[10px] uppercase tracking-wider text-neutral-500">Stop</span><br /><span className="text-rose-300">{num(t.stop)}</span> <span className="text-neutral-500">−{num(t.risk_pct, 1)}%</span></span>
+        <span><span className="font-sans text-[10px] uppercase tracking-wider text-neutral-500">{short ? 'Short zone' : 'Buy zone'}</span><br /><span className={short ? 'text-rose-200' : 'text-emerald-200'}>{num(zLo)}–{num(zHi)}</span></span>
+        <span><span className="font-sans text-[10px] uppercase tracking-wider text-neutral-500">Stop (today)</span><br /><span className="text-rose-300">{num(t.stop)}</span> <span className="text-neutral-500">{short ? '+' : '−'}{num(t.risk_pct, 1)}%</span></span>
         <span><span className="font-sans text-[10px] uppercase tracking-wider text-neutral-500">Size (your cap)</span><br /><span className="text-neutral-200">{t.shares ? `${t.shares} sh` : '—'}</span> <span className="text-neutral-500">risk ${num(t.risk_usd, 0)}</span></span>
         <span><span className="font-sans text-[10px] uppercase tracking-wider text-neutral-500">1R / 2R</span><br /><span className="text-neutral-200">{num(t.r1)} / {num(t.r2)}</span></span>
       </div>
+      {swing && (
+        <div className="mt-1.5 text-[12px] text-neutral-300">
+          <span className="text-[10px] uppercase tracking-wider text-neutral-500">If you hold overnight</span>{' '}
+          stop <span className="font-mono tabular-nums text-rose-300">{num(t.swing_stop)}</span>{' '}
+          <span className="text-neutral-500">({num(t.swing_risk_pct, 1)}%, 1 ATR)</span> · <span className="font-mono tabular-nums">{t.swing_shares} sh</span>{' '}
+          <span className="text-neutral-500">for the same ${num(t.risk_usd, 0)} at risk</span>
+        </div>
+      )}
+      {short && (
+        <div className="mt-1 text-[12px] text-neutral-300">
+          <span className="text-[10px] uppercase tracking-wider text-neutral-500">Put instead</span>{' '}
+          {t.put ? (
+            <>
+              <span className="font-mono tabular-nums">{t.put.expiry} {t.put.strike}P</span> ≈ ${num(t.put.mid)}{' '}
+              <span className="text-neutral-500">(${num(t.put.cost, 0)} a contract{t.put.delta != null ? `, delta ${num(t.put.delta)}` : ''}; max {t.put.max_contracts} under your cap) · exit if the stock is back above {num(t.stop)}</span>
+            </>
+          ) : <span className="text-neutral-500">no quote found. Shorting needs a borrow; a put keeps the loss to the premium. Exit if the stock is back above {num(t.stop)}.</span>}
+        </div>
+      )}
       <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px]">
         {(t.checks || []).map(([label, ok]) => (
           <span key={label} className={`inline-flex items-center gap-1 ${ok ? 'text-neutral-300' : 'text-neutral-600'}`}>
@@ -87,6 +115,10 @@ function ActCard({ ticker, price, t }) {
   );
 }
 
+const NAME = { 'reclaim:open': 'Reclaim open', 'reclaim:pdl': 'Reclaim PDL', 'orh:orh': 'Range-high break',
+  'reject:open': 'Lost open', 'reject:pdh': 'Lost PDH', 'orl:orl': 'Range-low break' };
+const avg = (a) => (a.n ? a.sum / a.n : null);
+
 function Scorecard() {
   const [rows, setRows] = useState(null);
   useEffect(() => {
@@ -94,9 +126,10 @@ function Scorecard() {
     (async () => {
       try {
         await authReady();
-        const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
-        const { data, error } = await supabase.from('level_triggers')
-          .select('kind, level_name, grade, hit_1r, stopped, close_r, final').gte('day', since).eq('final', true).limit(2000);
+        const since = new Date(Date.now() - 45 * 86400000).toISOString().slice(0, 10);
+        const q = (cols) => supabase.from('level_triggers').select(cols).gte('day', since).eq('final', true).limit(3000);
+        let { data, error } = await q('kind, level_name, grade, hit_1r, stopped, close_r, side, r2d, r5d, r10d');
+        if (error) ({ data, error } = await q('kind, level_name, grade, hit_1r, stopped, close_r'));   // before migration 018
         if (error) throw error;
         if (!off) setRows(data || []);
       } catch { if (!off) setRows([]); }
@@ -105,23 +138,32 @@ function Scorecard() {
   }, []);
   if (rows == null) return <div className="px-3 py-2 text-[12px] text-neutral-600">Loading…</div>;
   if (!rows.length) {
-    return <div className="px-3 py-2 text-[12px] text-neutral-500">No finished triggers yet. Every trigger (posted or not) is followed to the close; results show here from tomorrow.</div>;
+    return <div className="px-3 py-2 text-[12px] text-neutral-500">No finished triggers yet. Every trigger (posted or not) is followed to the close, then for 2, 5 and 10 sessions; results show here from tomorrow.</div>;
   }
   const by = new Map();
   for (const r of rows) {
-    const k = `${r.kind === 'reclaim' ? `Reclaim ${r.level_name === 'pdl' ? 'PDL' : 'open'}` : 'Range break'} · ${r.grade}`;
-    const a = by.get(k) || { k, n: 0, r1: 0, stopped: 0, sum: 0 };
+    const k = `${r.side === 'short' ? 'Short' : 'Long'} · ${NAME[`${r.kind}:${r.level_name}`] || r.kind} · ${r.grade}`;
+    const a = by.get(k) || { k, n: 0, r1: 0, stopped: 0, sum: 0, d2: { n: 0, sum: 0 }, d5: { n: 0, sum: 0 }, d10: { n: 0, sum: 0 } };
     a.n += 1; a.r1 += r.hit_1r ? 1 : 0; a.stopped += r.stopped && !r.hit_1r ? 1 : 0; a.sum += Number(r.close_r ?? 0);
+    for (const [f, d] of [['r2d', a.d2], ['r5d', a.d5], ['r10d', a.d10]]) {
+      if (r[f] != null) { d.n += 1; d.sum += Number(r[f]); }
+    }
     by.set(k, a);
   }
   const list = [...by.values()].sort((a, b) => a.k.localeCompare(b.k));
+  const Cell = ({ d }) => (
+    <td className="py-1 pr-2 text-right font-mono tabular-nums">
+      {d.n ? <><span className={avg(d) > 0 ? 'text-emerald-300' : 'text-rose-300'}>{rText(avg(d))}</span> <span className="text-neutral-600">{d.n}</span></> : <span className="text-neutral-700">—</span>}
+    </td>
+  );
   return (
     <div className="overflow-x-auto px-3 pb-2">
-      <table className="w-full min-w-[420px] text-[12px]">
+      <table className="w-full min-w-[640px] text-[12px]">
         <thead><tr className="text-left text-[9px] uppercase tracking-wider text-neutral-600">
-          <th className="py-1 pr-2 font-normal">Trigger · grade</th><th className="py-1 pr-2 text-right font-normal">Count</th>
+          <th className="py-1 pr-2 font-normal">Side · trigger · grade</th><th className="py-1 pr-2 text-right font-normal">Count</th>
           <th className="py-1 pr-2 text-right font-normal">1R before stop</th><th className="py-1 pr-2 text-right font-normal">Stopped first</th>
-          <th className="py-1 text-right font-normal">Avg R at close</th>
+          <th className="py-1 pr-2 text-right font-normal">R at close</th>
+          <th className="py-1 pr-2 text-right font-normal">+2 days</th><th className="py-1 pr-2 text-right font-normal">+5 days</th><th className="py-1 pr-2 text-right font-normal">+10 days</th>
         </tr></thead>
         <tbody>
           {list.map((a) => (
@@ -130,12 +172,13 @@ function Scorecard() {
               <td className="py-1 pr-2 text-right font-mono tabular-nums text-neutral-400">{a.n}</td>
               <td className="py-1 pr-2 text-right font-mono tabular-nums text-neutral-200">{Math.round((a.r1 / a.n) * 100)}%</td>
               <td className="py-1 pr-2 text-right font-mono tabular-nums text-neutral-400">{Math.round((a.stopped / a.n) * 100)}%</td>
-              <td className={`py-1 text-right font-mono tabular-nums ${a.sum / a.n > 0 ? 'text-emerald-300' : 'text-rose-300'}`}>{rText(a.sum / a.n)}</td>
+              <td className={`py-1 pr-2 text-right font-mono tabular-nums ${a.sum / a.n > 0 ? 'text-emerald-300' : 'text-rose-300'}`}>{rText(a.sum / a.n)}</td>
+              <Cell d={a.d2} /><Cell d={a.d5} /><Cell d={a.d10} />
             </tr>
           ))}
         </tbody>
       </table>
-      <p className="mt-1.5 text-[11px] text-neutral-600">Last 30 days, every trigger whether or not it was posted. Under about 30 in a row, treat the numbers as noise. Avg R at close assumes entry at the trigger price and no trim.</p>
+      <p className="mt-1.5 text-[11px] text-neutral-600">Last 45 days, every trigger whether or not it was posted. “R at close” is the day trade: entry at the trigger, today’s stop, out at the close. “+2 / +5 / +10 days” is the swing hold: same entry, the overnight stop (1 ATR), average R after that many sessions, with the number of triggers that have got that far in grey. Under about 30 in a row, treat the numbers as noise.</p>
     </div>
   );
 }
@@ -205,12 +248,12 @@ export default function ActionBoard({ watch }) {
       </div>
       {stale && <div className="border-t border-amber-500/30 bg-amber-500/5 px-3 py-1.5 text-[12px] text-amber-200">The watcher last updated {Math.round(ageMin)} min ago. Treat everything below as old until it catches up.</div>}
       {board.locked && <div className="border-t border-rose-500/30 bg-rose-500/5 px-3 py-1.5 text-[12px] text-rose-200">Daily loss stop reached. Entry alerts are paused for today.</div>}
-      {board.gate === 'red' && <div className="border-t border-rose-500/30 bg-rose-500/5 px-3 py-1.5 text-[12px] text-rose-200">Market gate is red: no entry triggers today. Open trades are still watched.</div>}
+      {board.gate === 'red' && <div className="border-t border-rose-500/30 bg-rose-500/5 px-3 py-1.5 text-[12px] text-rose-200">Market gate is red: no long triggers today. Short triggers on your focus list and open trades are still watched.</div>}
 
       <div className="border-t border-neutral-900">
         <Label>Act now {act.length > 0 && <span className="ml-1 font-mono normal-case tracking-normal text-emerald-300">{act.length}</span>}</Label>
         {act.length === 0 ? (
-          <div className="px-3 pb-2.5 text-[12px] text-neutral-500">Nothing in a buy zone right now. No trade is a valid outcome.</div>
+          <div className="px-3 pb-2.5 text-[12px] text-neutral-500">Nothing in a zone right now. No trade is a valid outcome.</div>
         ) : act.map((x) => <ActCard key={`${x.ticker}:${x.t.id}`} {...x} />)}
       </div>
 
@@ -219,10 +262,14 @@ export default function ActionBoard({ watch }) {
           <Label>Close to trigger</Label>
           <div className="px-3 pb-2.5">
             {close.map(({ ticker, price, n }) => (
-              <div key={`${ticker}:${n.level_name}`} className="flex flex-wrap items-baseline gap-x-2 py-0.5 text-[12px]">
+              <div key={`${ticker}:${n.kind}:${n.level_name}`} className="flex flex-wrap items-baseline gap-x-2 py-0.5 text-[12px]">
                 <Link to={`/lookup/${ticker}`} className="w-14 font-mono font-semibold text-neutral-100 hover:text-emerald-300">{ticker}</Link>
                 <span className="font-mono tabular-nums text-neutral-400">{num(price)}</span>
-                <span className="text-neutral-300">needs <span className="font-mono tabular-nums text-sky-200">{num(n.level)}</span> ({n.dist_pct > 0 ? '+' : ''}{num(n.dist_pct, 1)}%) to {n.kind === 'reclaim' ? `reclaim ${LEVEL[n.level_name]}` : `break ${LEVEL.orh}`}</span>
+                {n.side === 'short' ? (
+                  <span className="text-neutral-300">a <span className="text-rose-200">short</span> triggers if it loses <span className="font-mono tabular-nums text-sky-200">{num(n.level)}</span> ({num(-n.dist_pct, 1)}%), {LEVEL[n.level_name]}</span>
+                ) : (
+                  <span className="text-neutral-300">needs <span className="font-mono tabular-nums text-sky-200">{num(n.level)}</span> ({n.dist_pct > 0 ? '+' : ''}{num(n.dist_pct, 1)}%) to {n.kind === 'reclaim' ? `reclaim ${LEVEL[n.level_name]}` : `break ${LEVEL.orh}`}</span>
+                )}
                 {n.stop != null && <span className="text-neutral-500">· stop would be {num(n.stop)} ({num(n.risk_pct, 1)}%)</span>}
               </div>
             ))}
@@ -262,6 +309,7 @@ export default function ActionBoard({ watch }) {
                 <div key={`${ticker}:${t.id}`} className="flex flex-wrap items-baseline gap-x-2 py-0.5 text-[12px]">
                   <span className="w-12 font-mono text-[11px] tabular-nums text-neutral-500">{t.at}</span>
                   <Link to={`/lookup/${ticker}`} className="w-14 font-mono font-semibold text-neutral-100 hover:text-emerald-300">{ticker}</Link>
+                  <SideChip t={t} />
                   <span className={`rounded border px-1 text-[10px] ${GRADE[t.grade] || GRADE.C}`}>{t.grade}</span>
                   <span className="text-neutral-400">{what(t)}</span>
                   <span className={s.cls}>{s.label}</span>

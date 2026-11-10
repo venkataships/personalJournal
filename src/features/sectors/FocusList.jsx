@@ -52,7 +52,9 @@ function explain(f) {
 // so the card, the Action board and the alerts all say the same thing.
 const WSTATE = {
   triggered: { label: 'Triggered', cls: 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300' },
+  triggered_short: { label: 'Short triggered', cls: 'border-rose-500/50 bg-rose-500/10 text-rose-300' },
   armed: { label: 'Armed', cls: 'border-sky-500/40 bg-sky-500/10 text-sky-300' },
+  armed_short: { label: 'Short armed', cls: 'border-amber-500/40 bg-amber-500/10 text-amber-300' },
   failed: { label: 'Failed', cls: 'border-rose-500/50 bg-rose-500/10 text-rose-300' },
   below_open: { label: 'Under the open', cls: 'border-neutral-700 bg-neutral-800/40 text-neutral-300' },
   in_range: { label: 'In the range', cls: 'border-neutral-700 bg-neutral-800/40 text-neutral-300' },
