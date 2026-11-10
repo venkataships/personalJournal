@@ -281,6 +281,15 @@ export default function Guide() {
           </S>
 
           <S id="wl-groups" title="Watchlist groups">
+            <P><B>Strength view (Nov 10).</B> The same ranking, drawn so it reads at a glance. The ranking rule did not change; “Table” switches back to the old list.</P>
+            <Defs items={[
+              ['Buckets', 'Leading = ahead of SPY this week and over 20 days. Turning up (was “Improving”) = ahead this week, still behind over 20 days: a bounce until the 20-day turns; “deep 20-day hole” marks one that is 10+ points behind. Fading (was “Weakening”) = behind this week, still ahead over 20 days. Weak (was “Lagging”) = behind on both.'],
+              ['Strength line', 'Each session, the middle stock in the group minus SPY, added up over 30 sessions. Rising = gaining on SPY, falling = losing ground, a hook up at the coloured end = the turn is this week. Each line is scaled to itself (never tighter than 6 points), so read it for shape and use the bars for size. The dashed line is the starting level.'],
+              ['Lead over SPY bars', 'The 5-day and 20-day lead in points, drawn from a zero line. 5d and 20d are scaled separately, so compare 5d with 5d and 20d with 20d.'],
+              ['Last 10 days', 'One square per session, oldest on the left. Filled = the group beat SPY that day, hollow = it lost; darker = a bigger gap. 8/10 filled is persistent strength; 5/10 with a positive 5-day lead is one or two big days.'],
+              ['Names ahead of SPY', 'How many of the group’s names have a positive 5-day lead. 5/5 means the whole group is moving; 1/8 means one stock is carrying it.'],
+              ['Top line', 'How many groups are ahead of SPY this week and over 20 days (the breadth of your watchlist), then the three biggest climbers and fallers in rank over 5 sessions.'],
+            ]} />
             <P>Since Oct 31 the groups on Sectors are your watchlist categories, not hand-made lists. A category with one name goes to “Other”; the macro category isn’t a group. Each group’s ETF comes from its category (semis → SMH, memory → DRAM, big-tech → MAGS, nuclear → URA, space → UFO, quantum → QTUM, defense → ITA, …). Names that were only in the old groups (Mag Tech, Space, Semis, Memory) are no longer scanned unless they’re on the watchlist.</P>
             <Defs items={[
               ['Rank', 'Median of the group’s names: 5-day lead over SPY plus a quarter of the 20-day lead. Top third (max 3) green only if the group is Leading or Improving; bottom third red. The arrow is the rank change over 5 sessions; rotation = a move of about a quarter of the list (at least 3 places).'],
